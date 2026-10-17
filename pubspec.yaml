@@ -1,14 +1,14 @@
 name: nocterm_file_color
-description: A starting point for Dart libraries or applications.
-version: 1.0.0
-# repository: https://github.com/my_org/my_repo
+description: A Nocterm TextField wrapper that displays attached files as colored inline tags.
+version: 0.0.1
+repository: https://github.com/AmidVoshakul/nocterm_file_color
 
 environment:
   sdk: ^3.13.4
 
 # Add regular dependencies here.
 dependencies:
-  # path: ^1.9.0
+  nocterm: ^0.9.0
 
 dev_dependencies:
   lints: ^6.0.0

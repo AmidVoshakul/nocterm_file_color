@@ -1,39 +1,75 @@
-<!--
-This README describes the package. If you publish this package to pub.dev,
-this README's contents appear on the landing page for your package.
+# nocterm_file_color
 
-For information about how to write a good package README, see the guide for
-[writing package pages](https://dart.dev/tools/pub/writing-package-pages).
-
-For general information about developing packages, see the Dart guide for
-[creating packages](https://dart.dev/tools/pub/create-packages)
-and the Flutter guide for
-[developing packages and plugins](https://flutter.dev/to/develop-packages).
--->
-
-TODO: Put a short description of the package here that helps potential users
-know whether this package might be useful for them.
+A Nocterm TextField wrapper that displays attached files as colored inline tags.
 
 ## Features
 
-TODO: List what your package can do. Maybe include images, gifs, or videos.
+- **Inline file attachments** – attach files via paste, `@`-mention, drag & drop, or manual path input
+- **Color-coded tags** – files are shown as `[image 1]`, `[image 2]`, `[lib/main.dart]`, etc.
+- **Cross-platform** – works on Windows, macOS, and Linux
+- **Lightweight** – only depends on Nocterm's public APIs
 
-## Getting started
+## Getting Started
 
-TODO: List prerequisites and provide or point to information on how to
-start using the package.
+Add to your `pubspec.yaml`:
+
+```yaml
+dependencies:
+  nocterm: ^0.9.0
+  nocterm_file_color: ^0.0.1
+```
+
+Then run:
+
+```bash
+dart pub get
+```
 
 ## Usage
 
-TODO: Include short and useful examples for package users. Add longer examples
-to `/example` folder.
-
 ```dart
-const like = 'sample';
+final config = FileConfig.defaultConfig();
+
+final fileTextField = FileTextField(
+  fileConfig: config,
+  onFileClick: (file) {
+    // Default: open file location in OS file manager
+    FileOpener.openLocation(file.path);
+  },
+  onFilesChanged: (files) {
+    // Handle file attachment changes
+  },
+);
 ```
 
-## Additional information
+## Example
 
-TODO: Tell users more about the package: where to find more information, how to
-contribute to the package, how to file issues, what response they can expect
-from the package authors, and more.
+See `example/nocterm_file_color_example.dart` for a complete runnable example.
+
+## Architecture
+
+This package is a **wrapper** around Nocterm's `TextField`:
+- Does **not** modify Nocterm internals
+- Provides file attachment UI (tags) without interfering with text editing
+- Fully compatible with Nocterm updates (depends only on stable public API)
+
+## File Types & Colors
+
+| Type | Text Color | Background |
+|------|------------|------------|
+| Image | Magenta | Magenta |
+| Document | Blue | Blue |
+| Code | Green | Green |
+| Archive | Yellow | Yellow |
+| Audio/Video | Cyan | Cyan |
+| Other | Grey | Grey |
+
+## Integration
+
+1. Add `nocterm_file_color` as a dependency
+2. Configure `FileConfig` for custom colors if needed
+3. Register `onFileClick` and `onFilesChanged` callbacks
+
+## License
+
+MIT
