@@ -206,7 +206,7 @@ void main() {
           key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
           await tester.pump();
 
-          expect(controller.text, '[main.dart]');
+          expect(controller.text, '[main.dart] ');
           expect(tester.terminalState, containsText('[main.dart]'));
           expect(
             tester.terminalState.getCellAt(1, 0)?.style.color,
@@ -235,12 +235,90 @@ void main() {
         key.currentState!.attachFile(FileInfo.fromPath('/tmp/photo.png'));
         await tester.pump();
 
-        expect(controller.text, '[image 1]');
+        expect(controller.text, '[image 1] ');
         expect(tester.terminalState, containsText('[image 1]'));
       });
 
       controller.dispose();
     });
+
+    test('adds spacing after an attachment token', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('attachment spacing', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: false,
+            width: 30,
+            height: 1,
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+
+        expect(controller.text, '[main.dart] ');
+      });
+
+      controller.dispose();
+    });
+
+    test(
+      'backspace at an attachment boundary removes its whole token',
+      () async {
+        final controller = TextEditingController();
+        final key = GlobalKey<FileTextFieldState>();
+
+        await testNocterm('atomic attachment deletion', (tester) async {
+          await tester.pumpComponent(
+            FileTextField(
+              key: key,
+              controller: controller,
+              focused: true,
+              width: 30,
+              height: 1,
+            ),
+          );
+          key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+          controller.selection = const TextSelection.collapsed(offset: 11);
+          await tester.sendBackspace();
+
+          expect(controller.text, equals(''));
+          expect(key.currentState!.getAttachedFiles(), hasLength(0));
+        });
+
+        controller.dispose();
+      },
+    );
+
+    test(
+      'delete at the start of an attachment removes its whole token',
+      () async {
+        final controller = TextEditingController();
+        final key = GlobalKey<FileTextFieldState>();
+
+        await testNocterm('atomic attachment delete', (tester) async {
+          await tester.pumpComponent(
+            FileTextField(
+              key: key,
+              controller: controller,
+              focused: true,
+              width: 30,
+              height: 1,
+            ),
+          );
+          key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+          controller.selection = const TextSelection.collapsed(offset: 0);
+          await tester.sendDelete();
+
+          expect(controller.text, equals(''));
+          expect(key.currentState!.getAttachedFiles(), hasLength(0));
+        });
+
+        controller.dispose();
+      },
+    );
 
     test('remains editable after attaching an inline token', () async {
       final controller = TextEditingController(text: 'hello ');
@@ -269,7 +347,7 @@ void main() {
           const KeyboardEvent(logicalKey: LogicalKey.keyX, character: 'x'),
         );
 
-        expect(controller.text, 'xhello [main.dart]');
+        expect(controller.text, 'xhello [main.dart] ');
         expect(tester.terminalState, containsText('xhello [main.dart]'));
       });
 

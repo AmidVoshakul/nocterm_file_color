@@ -151,11 +151,18 @@ class FileTextFieldState extends State<FileTextField> {
     final token = FileTag.tokenFor(file, _styleFor(file));
     final text = _controller.text;
     final insertOffset = _controller.selection.start.clamp(0, text.length);
-    final newText =
-        '${text.substring(0, insertOffset)}$token${text.substring(insertOffset)}';
+    final before = text.substring(0, insertOffset);
+    final after = text.substring(insertOffset);
+    final needsLeadingSpace =
+        before.isNotEmpty && before.characters.last.trim().isNotEmpty;
+    final needsTrailingSpace =
+        after.isEmpty || after.characters.first.trim().isNotEmpty;
+    final insertion =
+        '${needsLeadingSpace ? ' ' : ''}$token${needsTrailingSpace ? ' ' : ''}';
+    final newText = '$before$insertion$after';
     _controller.text = newText;
     _controller.selection = TextSelection.collapsed(
-      offset: insertOffset + token.length,
+      offset: insertOffset + insertion.length,
     );
   }
 
@@ -165,12 +172,22 @@ class FileTextFieldState extends State<FileTextField> {
     final index = text.indexOf(token);
     if (index < 0) return;
 
-    final newText =
-        text.substring(0, index) + text.substring(index + token.length);
+    final range = _attachmentRemovalRange(text, index, index + token.length);
+    final newText = text.substring(0, range.$1) + text.substring(range.$2);
     _controller.text = newText;
     _controller.selection = TextSelection.collapsed(
-      offset: index.clamp(0, newText.length),
+      offset: range.$1.clamp(0, newText.length),
     );
+  }
+
+  (int, int) _attachmentRemovalRange(String text, int start, int end) {
+    if (start > 0 && text[start - 1].trim().isEmpty) {
+      return (start - 1, end);
+    }
+    if (end < text.length && text[end].trim().isEmpty) {
+      return (start, end + 1);
+    }
+    return (start, end);
   }
 
   FileStyle _styleFor(FileInfo file) =>
@@ -250,6 +267,15 @@ class FileTextFieldState extends State<FileTextField> {
 
   /// Handles key events: intercepts `@` for file mention and Ctrl+V for paste.
   bool _handleKeyEvent(KeyboardEvent event) {
+    if (event.logicalKey == LogicalKey.backspace ||
+        event.logicalKey == LogicalKey.delete) {
+      if (_removeAttachmentAtSelection(
+        backwards: event.logicalKey == LogicalKey.backspace,
+      )) {
+        return true;
+      }
+    }
+
     // @ key - trigger file mention (placeholder for future @-menu)
     if (event.logicalKey == LogicalKey.at && !event.isShiftPressed) {
       // TODO: Show @-menu for file picking
@@ -258,6 +284,38 @@ class FileTextFieldState extends State<FileTextField> {
     // Ctrl+V - let TextField handle paste (which calls onPaste)
     if (event.logicalKey == LogicalKey.keyV && event.isControlPressed) {
       return false; // Let TextField handle it
+    }
+    return false;
+  }
+
+  bool _removeAttachmentAtSelection({required bool backwards}) {
+    final text = _controller.text;
+    final selection = _controller.selection;
+    for (final file in _attachedFiles.toList()) {
+      final token = FileTag.tokenFor(file, _styleFor(file));
+      final tokenStart = text.indexOf(token);
+      if (tokenStart < 0) continue;
+      final tokenEnd = tokenStart + token.length;
+      final touchesToken = selection.isCollapsed
+          ? backwards
+                ? selection.extentOffset > tokenStart &&
+                      selection.extentOffset <= tokenEnd + 1
+                : selection.extentOffset >= tokenStart &&
+                      selection.extentOffset < tokenEnd
+          : selection.start < tokenEnd && selection.end > tokenStart;
+      if (!touchesToken) continue;
+
+      final range = _attachmentRemovalRange(text, tokenStart, tokenEnd);
+      final newText = text.substring(0, range.$1) + text.substring(range.$2);
+      setState(() {
+        _attachedFiles.remove(file);
+        _controller.text = newText;
+        _controller.selection = TextSelection.collapsed(
+          offset: range.$1.clamp(0, newText.length),
+        );
+        _notifyFilesChanged();
+      });
+      return true;
     }
     return false;
   }
