@@ -4,3 +4,4 @@ export 'src/file_info.dart';
 export 'src/file_opener.dart';
 export 'src/file_tag.dart';
 export 'src/file_text_field.dart';
+export 'src/file_text_field_suggestion.dart';

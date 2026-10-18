@@ -2,6 +2,64 @@ import 'package:nocterm_file_color/nocterm_file_color.dart';
 import 'package:test/test.dart';
 import 'package:nocterm/nocterm.dart';
 
+List<FileTextFieldSuggestion> _mockSuggestions(String trigger, String query) {
+  final fileConfig = FileConfig.defaultConfig();
+  late final List<FileTextFieldSuggestion> suggestions;
+  if (trigger == '/') {
+    const style = FileStyle(
+      text: Colors.brightMagenta,
+      background: Colors.magenta,
+      bold: true,
+    );
+    suggestions = [
+      FileTextFieldSuggestion.command(name: 'help', style: style),
+      FileTextFieldSuggestion.command(name: 'clear', style: style),
+    ];
+  } else {
+    const folderStyle = FileStyle(
+      text: Colors.brightYellow,
+      background: Colors.yellow,
+      bold: true,
+    );
+    const agentStyle = FileStyle(
+      text: Colors.brightCyan,
+      background: Colors.cyan,
+      bold: true,
+    );
+    final example = FileInfo.fromPath(
+      'example/nocterm_file_color_example.dart',
+    );
+    suggestions = [
+      FileTextFieldSuggestion.file(
+        example,
+        style: fileConfig.styleFor(example),
+      ),
+      const FileTextFieldSuggestion.folder(
+        name: 'example/',
+        style: folderStyle,
+        searchText: 'example folder',
+      ),
+      const FileTextFieldSuggestion.folder(
+        name: 'lib/',
+        style: folderStyle,
+        searchText: 'lib folder',
+      ),
+      const FileTextFieldSuggestion.agent(name: 'explore', style: agentStyle),
+      const FileTextFieldSuggestion.agent(name: 'general', style: agentStyle),
+      const FileTextFieldSuggestion.agent(
+        name: 'code-reviewer',
+        style: agentStyle,
+      ),
+    ];
+  }
+  final normalizedQuery = query.toLowerCase();
+  return suggestions
+      .where(
+        (suggestion) => suggestion.searchableText.contains(normalizedQuery),
+      )
+      .toList();
+}
+
 void main() {
   group('FileDetector', () {
     test('detects image extensions', () {
@@ -167,6 +225,17 @@ void main() {
       );
     });
 
+    test('token delimiters can be customized or omitted', () {
+      final file = FileInfo.fromPath('/tmp/main.dart');
+      expect(
+        FileTag.tokenFor(
+          file,
+          const FileStyle(openingDelimiter: '', closingDelimiter: ''),
+        ),
+        'main.dart',
+      );
+    });
+
     test('labelFor returns file name for non-images', () {
       final file = FileInfo.fromPath('/tmp/main.dart');
       final style = const FileStyle(prefix: 'code');
@@ -186,6 +255,88 @@ void main() {
       // Verify the class exists and can be instantiated
       expect(FileTextField, isA<Type>());
     });
+
+    test(
+      'types mention trigger as text when no provider is configured',
+      () async {
+        final controller = TextEditingController();
+
+        await testNocterm('literal mention without provider', (tester) async {
+          await tester.pumpComponent(
+            FileTextField(
+              controller: controller,
+              focused: true,
+              width: 30,
+              height: 1,
+            ),
+          );
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+          );
+
+          expect(controller.text, '@');
+        });
+
+        controller.dispose();
+      },
+    );
+
+    test('does not open suggestions for a read-only field', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('read-only mention', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            readOnly: true,
+            width: 30,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+
+        expect(tester.terminalState, isNot(containsText('@explore')));
+        expect(controller.text, equals(''));
+      });
+
+      controller.dispose();
+    });
+
+    test(
+      'allows the host app to replace the neutral suggestion menu',
+      () async {
+        final controller = TextEditingController();
+
+        await testNocterm('custom suggestion menu', (tester) async {
+          await tester.pumpComponent(
+            FileTextField(
+              controller: controller,
+              focused: true,
+              width: 30,
+              height: 1,
+              onSuggestionsRequested: _mockSuggestions,
+              suggestionMenuBuilder: (
+                context,
+                suggestions,
+                selectedIndex,
+                onSelected,
+              ) => const Text('Application menu'),
+            ),
+          );
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+          );
+
+          expect(tester.terminalState, containsText('Application menu'));
+        });
+
+        controller.dispose();
+      },
+    );
 
     test(
       'renders the attached file token inline with its configured color',
@@ -349,6 +500,262 @@ void main() {
 
         expect(controller.text, 'xhello [main.dart] ');
         expect(tester.terminalState, containsText('xhello [main.dart]'));
+      });
+
+      controller.dispose();
+    });
+
+    test('selects and inserts a filtered agent mention', () async {
+      final controller = TextEditingController(text: 'Run ');
+      final key = GlobalKey<FileTextFieldState>();
+      FileTextFieldSuggestion? selectedSuggestion;
+
+      await testNocterm('agent suggestion', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+            onSuggestionSelected: (suggestion) {
+              selectedSuggestion = suggestion;
+            },
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        for (final character in 'explore'.split('')) {
+          await tester.sendKeyEvent(
+            KeyboardEvent(logicalKey: LogicalKey.keyE, character: character),
+          );
+        }
+        expect(tester.terminalState, containsText('@explore'));
+        final menuMention = tester.terminalState.findText('@explore').first;
+        expect(
+          tester.terminalState
+              .getCellAt(menuMention.x, menuMention.y)
+              ?.style
+              .color,
+          isNot(Colors.brightCyan),
+        );
+        await tester.sendEnter();
+
+        expect(controller.text, 'Run [@explore] ');
+        expect(selectedSuggestion?.name, 'explore');
+        expect(
+          tester.terminalState.getCellAt(5, 0)?.style.color,
+          Colors.brightCyan,
+        );
+        expect(
+          tester.terminalState.getCellAt(5, 0)?.style.backgroundColor,
+          Colors.cyan,
+        );
+        expect(key.currentState!.getAttachedFiles(), hasLength(0));
+      });
+
+      controller.dispose();
+    });
+
+    test('selects a mention suggestion by mouse click', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('mouse suggestion selection', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        for (final character in 'explore'.split('')) {
+          await tester.sendKeyEvent(
+            KeyboardEvent(logicalKey: LogicalKey.keyE, character: character),
+          );
+        }
+        final suggestion = tester.terminalState.findText('@explore').first;
+        await tester.tap(suggestion.x, suggestion.y);
+
+        expect(controller.text, '[@explore] ');
+      });
+
+      controller.dispose();
+    });
+
+    test('selects a mock file and adds it to attached files', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('file suggestion', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 50,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        for (final character in 'nocterm_file_color_example.dart'.split('')) {
+          await tester.sendKeyEvent(
+            KeyboardEvent(logicalKey: LogicalKey.keyE, character: character),
+          );
+        }
+        await tester.sendEnter();
+
+        expect(controller.text, '[nocterm_file_color_example.dart] ');
+        expect(
+          key.currentState!.getAttachedFiles().single.path,
+          'example/nocterm_file_color_example.dart',
+        );
+      });
+
+      controller.dispose();
+    });
+
+    test('selects a mock folder as a colored inline token', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('folder suggestion', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        for (final character in 'folder'.split('')) {
+          await tester.sendKeyEvent(
+            KeyboardEvent(logicalKey: LogicalKey.keyE, character: character),
+          );
+        }
+        await tester.sendEnter();
+
+        expect(controller.text, '[example/] ');
+        expect(key.currentState!.getAttachedFiles(), hasLength(0));
+      });
+
+      controller.dispose();
+    });
+
+    test('navigates filtered suggestions with arrow keys', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('navigate suggestions', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        for (final character in 'folder'.split('')) {
+          await tester.sendKeyEvent(
+            KeyboardEvent(logicalKey: LogicalKey.keyE, character: character),
+          );
+        }
+        await tester.sendArrowDown();
+        await tester.sendEnter();
+
+        expect(controller.text, '[lib/] ');
+      });
+
+      controller.dispose();
+    });
+
+    test('selects a slash command as a colored inline token', () async {
+      final controller = TextEditingController(text: 'Run ');
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('slash command suggestion', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+        for (final character in 'help'.split('')) {
+          await tester.sendKeyEvent(
+            KeyboardEvent(logicalKey: LogicalKey.keyE, character: character),
+          );
+        }
+        await tester.sendEnter();
+
+        expect(controller.text, 'Run [/help] ');
+        expect(
+          tester.terminalState.getCellAt(5, 0)?.style.color,
+          Colors.brightMagenta,
+        );
+        expect(key.currentState!.getAttachedFiles(), hasLength(0));
+      });
+
+      controller.dispose();
+    });
+
+    test('special-token delimiters are configurable', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('custom suggestion delimiter', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 30,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => [
+              FileTextFieldSuggestion.command(
+                name: 'help',
+                style: const FileStyle(
+                  text: Colors.brightMagenta,
+                  openingDelimiter: '',
+                  closingDelimiter: '',
+                ),
+              ),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+        await tester.sendEnter();
+
+        expect(controller.text, '/help ');
       });
 
       controller.dispose();

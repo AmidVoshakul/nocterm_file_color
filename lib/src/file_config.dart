@@ -5,11 +5,19 @@ import 'file_info.dart';
 
 /// Visual appearance of a [FileTag].
 ///
-/// A style bundles the foreground/background colors, the label prefix and the
-/// font weight used to render an attached file. All fields are optional so a
-/// partial style can be layered on top of a default one.
+/// A style bundles foreground/background colors, the image label prefix, font
+/// weight, and optional delimiters for a colored token. Empty delimiters render
+/// the label without brackets. Colors and delimiters affect the inline token,
+/// not the host application's suggestion menu.
 class FileStyle {
-  const FileStyle({this.text, this.background, this.prefix, this.bold = false});
+  const FileStyle({
+    this.text,
+    this.background,
+    this.prefix,
+    this.bold = false,
+    this.openingDelimiter = '[',
+    this.closingDelimiter = ']',
+  });
 
   /// Foreground color of the tag text.
   final Color? text;
@@ -27,18 +35,28 @@ class FileStyle {
   /// Whether the tag text is rendered bold.
   final bool bold;
 
+  /// Text placed before a colored token. Set to an empty string to omit it.
+  final String openingDelimiter;
+
+  /// Text placed after a colored token. Set to an empty string to omit it.
+  final String closingDelimiter;
+
   /// Returns a copy of this style with the given fields replaced.
   FileStyle copyWith({
     Color? text,
     Color? background,
     String? prefix,
     bool? bold,
+    String? openingDelimiter,
+    String? closingDelimiter,
   }) {
     return FileStyle(
       text: text ?? this.text,
       background: background ?? this.background,
       prefix: prefix ?? this.prefix,
       bold: bold ?? this.bold,
+      openingDelimiter: openingDelimiter ?? this.openingDelimiter,
+      closingDelimiter: closingDelimiter ?? this.closingDelimiter,
     );
   }
 
@@ -58,11 +76,20 @@ class FileStyle {
         other.text == text &&
         other.background == background &&
         other.prefix == prefix &&
-        other.bold == bold;
+        other.bold == bold &&
+        other.openingDelimiter == openingDelimiter &&
+        other.closingDelimiter == closingDelimiter;
   }
 
   @override
-  int get hashCode => Object.hash(text, background, prefix, bold);
+  int get hashCode => Object.hash(
+    text,
+    background,
+    prefix,
+    bold,
+    openingDelimiter,
+    closingDelimiter,
+  );
 }
 
 /// Maps file categories and extensions to [FileStyle]s.

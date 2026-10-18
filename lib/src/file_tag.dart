@@ -5,7 +5,8 @@ import 'file_info.dart';
 
 /// Inline, colored label representing a single attached file.
 ///
-/// A tag renders as `[<label>]` painted with the colors of its [FileStyle].
+/// A tag renders with the delimiters and colors of its [FileStyle]. By default
+/// the delimiters are square brackets, but they can be omitted or customized.
 /// Files that carry a meaningful name (everything but images) show that name,
 /// e.g. `[lib/main.dart]`; images are identified by their category and a
 /// one-based [index], e.g. `[image 1]`, `[image 2]`.
@@ -52,14 +53,17 @@ class FileTag extends StatelessComponent {
 
   /// Returns the complete token stored in the editing controller.
   static String tokenFor(FileInfo file, FileStyle style, {int? index}) =>
-      '[${labelFor(file, style, index: index)}]';
+      '${style.openingDelimiter}${labelFor(file, style, index: index)}${style.closingDelimiter}';
 
   /// Label of this tag, without the surrounding brackets.
   String get label => labelFor(file, style, index: index);
 
   @override
   Component build(BuildContext context) {
-    final text = Text('[$label]', style: style.toTextStyle());
+    final text = Text(
+      '${style.openingDelimiter}$label${style.closingDelimiter}',
+      style: style.toTextStyle(),
+    );
     if (onTap == null) return text;
     return GestureDetector(onTap: () => onTap!(file), child: text);
   }

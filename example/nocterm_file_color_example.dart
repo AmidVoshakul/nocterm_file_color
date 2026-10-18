@@ -53,6 +53,87 @@ class _FileTextFieldDemoState extends State<FileTextFieldDemo> {
     }
   }
 
+  List<FileTextFieldSuggestion> _provideSuggestions(
+    String trigger,
+    String query,
+  ) {
+    final config = FileConfig.defaultConfig();
+    final suggestions = <FileTextFieldSuggestion>[];
+
+    if (trigger == '/') {
+      const commandStyle = FileStyle(
+        text: Colors.brightMagenta,
+        background: Colors.magenta,
+        bold: true,
+      );
+      suggestions.addAll([
+        const FileTextFieldSuggestion.command(
+          name: 'help',
+          style: commandStyle,
+        ),
+        const FileTextFieldSuggestion.command(
+          name: 'clear',
+          style: commandStyle,
+        ),
+        const FileTextFieldSuggestion.command(
+          name: 'model',
+          style: commandStyle,
+        ),
+      ]);
+    } else {
+      for (final path in [
+        'example/nocterm_file_color_example.dart',
+        'lib/src/file_text_field.dart',
+        'README.md',
+      ]) {
+        final file = FileInfo.fromPath(path);
+        suggestions.add(
+          FileTextFieldSuggestion.file(
+            file,
+            style: config.styleFor(file),
+            searchText: '${file.name} file',
+          ),
+        );
+      }
+
+      const folderStyle = FileStyle(
+        text: Colors.brightYellow,
+        background: Colors.yellow,
+        bold: true,
+      );
+      const agentStyle = FileStyle(
+        text: Colors.brightCyan,
+        background: Colors.cyan,
+        bold: true,
+      );
+      suggestions.addAll([
+        const FileTextFieldSuggestion.folder(
+          name: 'example/',
+          style: folderStyle,
+          searchText: 'example folder',
+        ),
+        const FileTextFieldSuggestion.folder(
+          name: 'lib/',
+          style: folderStyle,
+          searchText: 'lib folder',
+        ),
+        const FileTextFieldSuggestion.agent(name: 'explore', style: agentStyle),
+        const FileTextFieldSuggestion.agent(name: 'general', style: agentStyle),
+        const FileTextFieldSuggestion.agent(
+          name: 'code-reviewer',
+          style: agentStyle,
+        ),
+      ]);
+    }
+
+    final normalizedQuery = query.toLowerCase();
+    return suggestions
+        .where(
+          (suggestion) => suggestion.searchableText.contains(normalizedQuery),
+        )
+        .toList();
+  }
+
   @override
   Component build(BuildContext context) {
     return Focusable(
@@ -73,7 +154,9 @@ class _FileTextFieldDemoState extends State<FileTextFieldDemo> {
               ),
             ),
             const SizedBox(height: 1),
-            const Text('Use Tab/Shift+Tab to navigate, Esc to exit'),
+            const Text(
+              'Tab navigates fields. Type @ or /, use arrows, Enter to select, Esc to close.',
+            ),
             const SizedBox(height: 2),
 
             // Single line field
@@ -193,8 +276,8 @@ class _FileTextFieldDemoState extends State<FileTextFieldDemo> {
             ),
             const SizedBox(height: 1),
 
-            // FileTextField renders attached tokens inline with colored styles.
-            const Text('FileTextField (paste a file path to attach it):'),
+            // Mock file, folder, agent, and command suggestions.
+            const Text('FileTextField (@ mentions and / commands):'),
             Container(
               decoration: BoxDecoration(
                 border: BoxBorder.all(
@@ -206,7 +289,14 @@ class _FileTextFieldDemoState extends State<FileTextFieldDemo> {
                 focused: _focusedField == 6,
                 width: 50,
                 height: 1,
-                placeholder: 'Enter text or paste file paths...',
+                placeholder: 'Type @ for mentions or / for commands...',
+                onSuggestionsRequested: _provideSuggestions,
+                onSuggestionSelected: (suggestion) {
+                  setState(() {
+                    _submittedText =
+                        'Selected ${suggestion.kind.name}: ${suggestion.displayLabel}';
+                  });
+                },
                 onSubmitted: (text) {
                   setState(() {
                     _submittedText = 'Submitted: $text';
@@ -222,7 +312,7 @@ class _FileTextFieldDemoState extends State<FileTextFieldDemo> {
                 },
               ),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 1),
 
             // Display submitted text
             if (_submittedText.isNotEmpty) ...[

@@ -5,12 +5,22 @@ import 'file_config.dart';
 import 'file_info.dart';
 import 'file_opener.dart';
 import 'file_tag.dart';
+import 'file_text_field_suggestion.dart';
+
+class _InlineToken {
+  const _InlineToken({required this.token, required this.style, this.file});
+
+  final String token;
+  final FileStyle style;
+  final FileInfo? file;
+}
 
 /// A [TextField] wrapper that displays attached files as colored inline tags.
 ///
-/// Files can be attached via paste or programmatically. Their tokens (for
-/// example, `[image 1]` or `[lib/main.dart]`) remain in the editing controller
-/// and are rendered with per-file colors directly in the input line.
+/// Files can be attached via paste, an application-provided suggestion menu,
+/// or programmatically. Their tokens (for example, `[image 1]` or
+/// `[lib/main.dart]`) remain in the editing controller and are rendered with
+/// per-file colors directly in the input line.
 ///
 /// The host application retrieves the current attachments via
 /// [FileTextFieldState.getAttachedFiles] (typically through a [GlobalKey]) and
@@ -23,6 +33,9 @@ class FileTextField extends StatefulComponent {
   /// - [fileConfig]: color scheme for file tags (defaults to [FileConfig.defaultConfig]).
   /// - [onFileClick]: called when a tag is tapped; defaults to opening the file location in the OS file manager.
   /// - [onFilesChanged]: called whenever the attachment list changes.
+  /// - [onSuggestionsRequested]: provides app-owned candidates for `@` and `/`.
+  /// - [onSuggestionSelected]: reports the selected candidate to the host app.
+  /// - [suggestionMenuBuilder]: optionally replaces the neutral default menu.
   const FileTextField({
     super.key,
     this.controller,
@@ -53,6 +66,9 @@ class FileTextField extends StatefulComponent {
     this.fileConfig,
     this.onFileClick,
     this.onFilesChanged,
+    this.onSuggestionsRequested,
+    this.onSuggestionSelected,
+    this.suggestionMenuBuilder,
   }) : assert(maxLines == null || maxLines > 0),
        assert(minLines == null || minLines > 0),
        assert(
@@ -96,6 +112,9 @@ class FileTextField extends StatefulComponent {
   final FileConfig? fileConfig;
   final ValueChanged<FileInfo>? onFileClick;
   final ValueChanged<List<FileInfo>>? onFilesChanged;
+  final FileTextFieldSuggestionProvider? onSuggestionsRequested;
+  final ValueChanged<FileTextFieldSuggestion>? onSuggestionSelected;
+  final FileTextFieldSuggestionMenuBuilder? suggestionMenuBuilder;
 
   @override
   State<FileTextField> createState() => FileTextFieldState();
@@ -106,7 +125,12 @@ class FileTextFieldState extends State<FileTextField> {
   late TextEditingController _controller;
   bool _controllerIsInternal = false;
   final List<FileInfo> _attachedFiles = [];
+  final List<_InlineToken> _inlineTokens = [];
   int _imageCounter = 0;
+  String? _activeTrigger;
+  String _suggestionQuery = '';
+  List<FileTextFieldSuggestion> _providedSuggestions = const [];
+  int _selectedSuggestionIndex = 0;
 
   /// Returns the current list of attached files.
   ///
@@ -115,15 +139,17 @@ class FileTextFieldState extends State<FileTextField> {
   List<FileInfo> getAttachedFiles() => List.unmodifiable(_attachedFiles);
 
   /// Adds a file to the attachment list and inserts its token into the text.
-  void attachFile(FileInfo file) {
+  void attachFile(FileInfo file, {FileStyle? style}) {
     setState(() {
+      final fileStyle = style ?? _styleFor(file);
       if (file.type == FileType.image) {
         _imageCounter++;
-        final style = _styleFor(file);
-        file = file.copyWith(name: '${style.prefix ?? 'image'} $_imageCounter');
+        file = file.copyWith(
+          name: '${fileStyle.prefix ?? 'image'} $_imageCounter',
+        );
       }
       _attachedFiles.add(file);
-      _insertToken(file);
+      _insertToken(file, style: fileStyle);
       _notifyFilesChanged();
     });
   }
@@ -141,14 +167,32 @@ class FileTextFieldState extends State<FileTextField> {
   void clearAttachments() {
     setState(() {
       _attachedFiles.clear();
+      _inlineTokens.clear();
       _imageCounter = 0;
+      _activeTrigger = null;
+      _suggestionQuery = '';
+      _providedSuggestions = const [];
+      _selectedSuggestionIndex = 0;
       _controller.clear();
       _notifyFilesChanged();
     });
   }
 
-  void _insertToken(FileInfo file) {
-    final token = FileTag.tokenFor(file, _styleFor(file));
+  void _insertToken(FileInfo file, {required FileStyle style}) {
+    _insertInlineToken(
+      _InlineToken(
+        token: FileTag.tokenFor(file, style),
+        style: style,
+        file: file,
+      ),
+    );
+  }
+
+  void _insertSpecialToken(String token, FileStyle style) {
+    _insertInlineToken(_InlineToken(token: token, style: style));
+  }
+
+  void _insertInlineToken(_InlineToken inlineToken) {
     final text = _controller.text;
     final insertOffset = _controller.selection.start.clamp(0, text.length);
     final before = text.substring(0, insertOffset);
@@ -158,8 +202,9 @@ class FileTextFieldState extends State<FileTextField> {
     final needsTrailingSpace =
         after.isEmpty || after.characters.first.trim().isNotEmpty;
     final insertion =
-        '${needsLeadingSpace ? ' ' : ''}$token${needsTrailingSpace ? ' ' : ''}';
+        '${needsLeadingSpace ? ' ' : ''}${inlineToken.token}${needsTrailingSpace ? ' ' : ''}';
     final newText = '$before$insertion$after';
+    _inlineTokens.add(inlineToken);
     _controller.text = newText;
     _controller.selection = TextSelection.collapsed(
       offset: insertOffset + insertion.length,
@@ -167,7 +212,12 @@ class FileTextFieldState extends State<FileTextField> {
   }
 
   void _removeToken(FileInfo file) {
-    final token = FileTag.tokenFor(file, _styleFor(file));
+    final tokenIndex = _inlineTokens.indexWhere(
+      (inlineToken) => inlineToken.file == file,
+    );
+    if (tokenIndex < 0) return;
+    final inlineToken = _inlineTokens.removeAt(tokenIndex);
+    final token = inlineToken.token;
     final text = _controller.text;
     final index = text.indexOf(token);
     if (index < 0) return;
@@ -200,11 +250,15 @@ class FileTextFieldState extends State<FileTextField> {
 
   void _syncAttachmentsFromText() {
     final text = _controller.text;
-    final toRemove = _attachedFiles
-        .where(
-          (file) => !text.contains(FileTag.tokenFor(file, _styleFor(file))),
-        )
-        .toList();
+    _inlineTokens.removeWhere(
+      (inlineToken) => !text.contains(inlineToken.token),
+    );
+    final toRemove = _attachedFiles.where((file) {
+      return !_inlineTokens.any(
+        (inlineToken) =>
+            inlineToken.file == file && text.contains(inlineToken.token),
+      );
+    }).toList();
     if (toRemove.isEmpty) return;
 
     _attachedFiles.removeWhere(toRemove.contains);
@@ -251,6 +305,11 @@ class FileTextFieldState extends State<FileTextField> {
       _controller.addListener(_handleControllerChanged);
       _syncAttachmentsFromText();
     }
+    if (component.onSuggestionsRequested !=
+            oldComponent.onSuggestionsRequested &&
+        _activeTrigger != null) {
+      setState(_refreshSuggestions);
+    }
   }
 
   /// Handles paste events: intercepts file paths and attaches them.
@@ -267,6 +326,9 @@ class FileTextFieldState extends State<FileTextField> {
 
   /// Handles key events: intercepts `@` for file mention and Ctrl+V for paste.
   bool _handleKeyEvent(KeyboardEvent event) {
+    if (!component.enabled || component.readOnly) return false;
+    if (_activeTrigger != null) return _handleSuggestionKeyEvent(event);
+
     if (event.logicalKey == LogicalKey.backspace ||
         event.logicalKey == LogicalKey.delete) {
       if (_removeAttachmentAtSelection(
@@ -276,9 +338,17 @@ class FileTextFieldState extends State<FileTextField> {
       }
     }
 
-    // @ key - trigger file mention (placeholder for future @-menu)
-    if (event.logicalKey == LogicalKey.at && !event.isShiftPressed) {
-      // TODO: Show @-menu for file picking
+    if ((event.logicalKey == LogicalKey.at || event.character == '@') &&
+        component.onSuggestionsRequested != null &&
+        _isTriggerBoundary()) {
+      _openSuggestions('@');
+      return true;
+    }
+
+    if ((event.logicalKey == LogicalKey.slash || event.character == '/') &&
+        component.onSuggestionsRequested != null &&
+        _isTriggerBoundary()) {
+      _openSuggestions('/');
       return true;
     }
     // Ctrl+V - let TextField handle paste (which calls onPaste)
@@ -288,14 +358,131 @@ class FileTextFieldState extends State<FileTextField> {
     return false;
   }
 
+  bool _isTriggerBoundary() {
+    final offset = _controller.selection.extentOffset.clamp(
+      0,
+      _controller.text.length,
+    );
+    return offset == 0 || _controller.text[offset - 1].trim().isEmpty;
+  }
+
+  void _openSuggestions(String trigger) {
+    setState(() {
+      _activeTrigger = trigger;
+      _suggestionQuery = '';
+      _selectedSuggestionIndex = 0;
+      _refreshSuggestions();
+    });
+  }
+
+  bool _handleSuggestionKeyEvent(KeyboardEvent event) {
+    if (event.logicalKey == LogicalKey.escape) {
+      _closeSuggestions();
+      return true;
+    }
+    if (event.logicalKey == LogicalKey.arrowUp ||
+        event.logicalKey == LogicalKey.arrowDown) {
+      final suggestions = _visibleSuggestions;
+      if (suggestions.isNotEmpty) {
+        final direction = event.logicalKey == LogicalKey.arrowDown ? 1 : -1;
+        setState(() {
+          _selectedSuggestionIndex =
+              (_selectedSuggestionIndex + direction + suggestions.length) %
+              suggestions.length;
+        });
+      }
+      return true;
+    }
+    if (event.logicalKey == LogicalKey.enter) {
+      final suggestions = _visibleSuggestions;
+      if (suggestions.isNotEmpty) {
+        _selectSuggestion(suggestions[_selectedSuggestionIndex]);
+      } else {
+        _closeSuggestions();
+      }
+      return true;
+    }
+    if (event.logicalKey == LogicalKey.backspace) {
+      if (_suggestionQuery.isEmpty) {
+        _closeSuggestions();
+      } else {
+        setState(() {
+          _suggestionQuery = _suggestionQuery.characters.skipLast(1).toString();
+          _refreshSuggestions();
+        });
+      }
+      return true;
+    }
+    if (event.logicalKey == LogicalKey.delete) return true;
+    if (event.character != null && !event.isControlPressed) {
+      if (event.character!.trim().isEmpty) {
+        _closeSuggestions();
+        return false;
+      }
+      setState(() {
+        _suggestionQuery += event.character!;
+        _refreshSuggestions();
+      });
+      return true;
+    }
+    return false;
+  }
+
+  void _closeSuggestions() {
+    setState(() {
+      _activeTrigger = null;
+      _suggestionQuery = '';
+      _providedSuggestions = const [];
+      _selectedSuggestionIndex = 0;
+    });
+  }
+
+  void _refreshSuggestions() {
+    final trigger = _activeTrigger;
+    final provider = component.onSuggestionsRequested;
+    _providedSuggestions = trigger == null || provider == null
+        ? const []
+        : List.unmodifiable(provider(trigger, _suggestionQuery));
+    _selectedSuggestionIndex = 0;
+  }
+
+  List<FileTextFieldSuggestion> get _visibleSuggestions {
+    final query = _suggestionQuery.toLowerCase();
+    return _providedSuggestions
+        .where((suggestion) => suggestion.searchableText.contains(query))
+        .toList();
+  }
+
+  void _selectSuggestion(FileTextFieldSuggestion suggestion) {
+    _closeSuggestions();
+    final file = suggestion.file;
+    if (file != null) {
+      attachFile(file, style: suggestion.style);
+    } else {
+      final label = switch (suggestion.kind) {
+        FileTextFieldSuggestionKind.folder => suggestion.name,
+        FileTextFieldSuggestionKind.agent => '@${suggestion.name}',
+        FileTextFieldSuggestionKind.command => '/${suggestion.name}',
+        FileTextFieldSuggestionKind.file => throw StateError(
+          'File suggestions must include a FileInfo.',
+        ),
+      };
+      final token =
+          '${suggestion.style.openingDelimiter}$label${suggestion.style.closingDelimiter}';
+      setState(() {
+        _insertSpecialToken(token, suggestion.style);
+      });
+    }
+    component.onSuggestionSelected?.call(suggestion);
+  }
+
   bool _removeAttachmentAtSelection({required bool backwards}) {
     final text = _controller.text;
     final selection = _controller.selection;
-    for (final file in _attachedFiles.toList()) {
-      final token = FileTag.tokenFor(file, _styleFor(file));
-      final tokenStart = text.indexOf(token);
+    for (final inlineToken in _inlineTokens.toList()) {
+      final tokenStart = text.indexOf(inlineToken.token);
       if (tokenStart < 0) continue;
-      final tokenEnd = tokenStart + token.length;
+      final tokenEnd = tokenStart + inlineToken.token.length;
       final touchesToken = selection.isCollapsed
           ? backwards
                 ? selection.extentOffset > tokenStart &&
@@ -308,12 +495,14 @@ class FileTextFieldState extends State<FileTextField> {
       final range = _attachmentRemovalRange(text, tokenStart, tokenEnd);
       final newText = text.substring(0, range.$1) + text.substring(range.$2);
       setState(() {
-        _attachedFiles.remove(file);
+        _inlineTokens.remove(inlineToken);
+        final file = inlineToken.file;
+        if (file != null) _attachedFiles.remove(file);
         _controller.text = newText;
         _controller.selection = TextSelection.collapsed(
           offset: range.$1.clamp(0, newText.length),
         );
-        _notifyFilesChanged();
+        if (file != null) _notifyFilesChanged();
       });
       return true;
     }
@@ -347,7 +536,7 @@ class FileTextFieldState extends State<FileTextField> {
 
   @override
   Component build(BuildContext context) {
-    final showInlineTags = _attachedFiles.isNotEmpty && !component.obscureText;
+    final showInlineTags = _inlineTokens.isNotEmpty && !component.obscureText;
     final textField = TextField(
       controller: _controller,
       focused: component.focused,
@@ -382,22 +571,70 @@ class FileTextFieldState extends State<FileTextField> {
       height: component.height,
     );
 
-    if (!showInlineTags) return textField;
-
-    return Stack(
-      children: [
-        textField,
-        GestureDetector(
-          onTapDown: _handleInlineTapDown,
-          child: RichText(
-            text: TextSpan(children: _buildInlineSpans(context)),
-            textAlign: component.textAlign,
-            softWrap: component.maxLines != 1,
-            overflow: TextOverflow.clip,
-            maxLines: component.maxLines,
+    Component input = textField;
+    if (showInlineTags) {
+      input = Stack(
+        children: [
+          textField,
+          GestureDetector(
+            onTapDown: _handleInlineTapDown,
+            child: RichText(
+              text: TextSpan(children: _buildInlineSpans(context)),
+              textAlign: component.textAlign,
+              softWrap: component.maxLines != 1,
+              overflow: TextOverflow.clip,
+              maxLines: component.maxLines,
+            ),
           ),
-        ),
-      ],
+        ],
+      );
+    }
+
+    if (_activeTrigger == null) return input;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [_buildSuggestionMenu(), input],
+    );
+  }
+
+  Component _buildSuggestionMenu() {
+    final suggestions = _visibleSuggestions;
+    final menuBuilder = component.suggestionMenuBuilder;
+    if (menuBuilder != null) {
+      return menuBuilder(
+        context,
+        List.unmodifiable(suggestions),
+        _selectedSuggestionIndex,
+        _selectSuggestion,
+      );
+    }
+
+    return _buildDefaultSuggestionMenu(suggestions);
+  }
+
+  Component _buildDefaultSuggestionMenu(
+    List<FileTextFieldSuggestion> suggestions,
+  ) {
+    return Container(
+      width: component.width,
+      padding: const EdgeInsets.symmetric(vertical: 1),
+      decoration: BoxDecoration(border: BoxBorder.all(color: Colors.gray)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: suggestions.isEmpty
+            ? [const Text('No matches', style: TextStyle(color: Colors.gray))]
+            : [
+                for (var index = 0; index < suggestions.length; index++)
+                  GestureDetector(
+                    onTap: () => _selectSuggestion(suggestions[index]),
+                    child: Text(
+                      '${index == _selectedSuggestionIndex ? '> ' : '  '}'
+                      '${suggestions[index].displayLabel}',
+                    ),
+                  ),
+              ],
+      ),
     );
   }
 
@@ -422,12 +659,13 @@ class FileTextFieldState extends State<FileTextField> {
     }
     offset = offset.clamp(0, text.length);
 
-    for (final file in _attachedFiles) {
-      final token = FileTag.tokenFor(file, _styleFor(file));
-      final tokenStart = text.indexOf(token);
+    for (final inlineToken in _inlineTokens) {
+      final file = inlineToken.file;
+      if (file == null) continue;
+      final tokenStart = text.indexOf(inlineToken.token);
       if (tokenStart >= 0 &&
           offset >= tokenStart &&
-          offset < tokenStart + token.length) {
+          offset < tokenStart + inlineToken.token.length) {
         if (component.onFileClick != null) {
           component.onFileClick!(file);
         } else {
@@ -471,10 +709,14 @@ class FileTextFieldState extends State<FileTextField> {
     final unstyledText = component.style ?? const TextStyle();
     final selectionColor =
         component.selectionColor ?? cursorColor.withOpacity(0.4);
-    final attachments = _attachedFiles.map((file) {
-      final style = _styleFor(file);
-      return (token: FileTag.tokenFor(file, style), style: style.toTextStyle());
-    }).toList();
+    final attachments = _inlineTokens
+        .map(
+          (inlineToken) => (
+            token: inlineToken.token,
+            style: inlineToken.style.toTextStyle(),
+          ),
+        )
+        .toList();
     final spans = <InlineSpan>[];
     var offset = 0;
 
