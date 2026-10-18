@@ -43,10 +43,16 @@ class FileTag extends StatelessComponent {
   static String labelFor(FileInfo file, FileStyle style, {int? index}) {
     if (file.type == FileType.image) {
       final word = style.prefix ?? file.displayLabel;
-      return index == null ? word : '$word $index';
+      if (index != null) return '$word $index';
+      if (file.name.startsWith('$word ')) return file.name;
+      return word;
     }
     return file.name;
   }
+
+  /// Returns the complete token stored in the editing controller.
+  static String tokenFor(FileInfo file, FileStyle style, {int? index}) =>
+      '[${labelFor(file, style, index: index)}]';
 
   /// Label of this tag, without the surrounding brackets.
   String get label => labelFor(file, style, index: index);

@@ -1,3 +1,4 @@
+import 'package:characters/characters.dart';
 import 'package:nocterm/nocterm.dart';
 
 import 'file_config.dart';
@@ -7,10 +8,9 @@ import 'file_tag.dart';
 
 /// A [TextField] wrapper that displays attached files as colored inline tags.
 ///
-/// Files can be attached via paste, `@`-mention, drag & drop, or programmatically.
-/// Attached files are shown as clickable [FileTag]s in a tray above the text field
-/// and are also inserted as tokens (e.g. `[image 1]`, `[lib/main.dart]`) into the
-/// editing controller so the plain text reflects the attachments.
+/// Files can be attached via paste or programmatically. Their tokens (for
+/// example, `[image 1]` or `[lib/main.dart]`) remain in the editing controller
+/// and are rendered with per-file colors directly in the input line.
 ///
 /// The host application retrieves the current attachments via
 /// [FileTextFieldState.getAttachedFiles] (typically through a [GlobalKey]) and
@@ -119,7 +119,8 @@ class FileTextFieldState extends State<FileTextField> {
     setState(() {
       if (file.type == FileType.image) {
         _imageCounter++;
-        file = file.copyWith(name: 'image $_imageCounter');
+        final style = _styleFor(file);
+        file = file.copyWith(name: '${style.prefix ?? 'image'} $_imageCounter');
       }
       _attachedFiles.add(file);
       _insertToken(file);
@@ -147,42 +148,56 @@ class FileTextFieldState extends State<FileTextField> {
   }
 
   void _insertToken(FileInfo file) {
-    final style =
-        component.fileConfig?.styleFor(file) ??
-        FileConfig.defaultConfig().styleFor(file);
-    final token = FileTag.labelFor(file, style);
+    final token = FileTag.tokenFor(file, _styleFor(file));
     final text = _controller.text;
-    final selection = _controller.selection;
-    final insertOffset = selection.start.clamp(0, text.length);
+    final insertOffset = _controller.selection.start.clamp(0, text.length);
     final newText =
-        '${text.substring(0, insertOffset)}[$token]${text.substring(insertOffset)}';
+        '${text.substring(0, insertOffset)}$token${text.substring(insertOffset)}';
     _controller.text = newText;
     _controller.selection = TextSelection.collapsed(
-      offset: insertOffset + token.length + 2,
+      offset: insertOffset + token.length,
     );
   }
 
   void _removeToken(FileInfo file) {
-    final style =
-        component.fileConfig?.styleFor(file) ??
-        FileConfig.defaultConfig().styleFor(file);
-    final token = FileTag.labelFor(file, style);
+    final token = FileTag.tokenFor(file, _styleFor(file));
     final text = _controller.text;
-    final tokenWithBrackets = '[$token]';
-    final index = text.indexOf(tokenWithBrackets);
-    if (index >= 0) {
-      final newText =
-          text.substring(0, index) +
-          text.substring(index + tokenWithBrackets.length);
-      _controller.text = newText;
-      _controller.selection = TextSelection.collapsed(
-        offset: index.clamp(0, newText.length),
-      );
-    }
+    final index = text.indexOf(token);
+    if (index < 0) return;
+
+    final newText =
+        text.substring(0, index) + text.substring(index + token.length);
+    _controller.text = newText;
+    _controller.selection = TextSelection.collapsed(
+      offset: index.clamp(0, newText.length),
+    );
   }
+
+  FileStyle _styleFor(FileInfo file) =>
+      component.fileConfig?.styleFor(file) ??
+      FileConfig.defaultConfig().styleFor(file);
 
   void _notifyFilesChanged() {
     component.onFilesChanged?.call(List.unmodifiable(_attachedFiles));
+  }
+
+  void _syncAttachmentsFromText() {
+    final text = _controller.text;
+    final toRemove = _attachedFiles
+        .where(
+          (file) => !text.contains(FileTag.tokenFor(file, _styleFor(file))),
+        )
+        .toList();
+    if (toRemove.isEmpty) return;
+
+    _attachedFiles.removeWhere(toRemove.contains);
+    _notifyFilesChanged();
+  }
+
+  void _handleControllerChanged() {
+    component.onChanged?.call(_controller.text);
+    _syncAttachmentsFromText();
+    setState(() {});
   }
 
   @override
@@ -208,23 +223,16 @@ class FileTextFieldState extends State<FileTextField> {
     super.dispose();
   }
 
-  void _handleControllerChanged() {
-    component.onChanged?.call(_controller.text);
-  }
-
   @override
   void didUpdateComponent(FileTextField oldComponent) {
     super.didUpdateComponent(oldComponent);
     if (component.controller != oldComponent.controller) {
       _controller.removeListener(_handleControllerChanged);
-      if (component.controller == null) {
-        _controller = TextEditingController();
-        _controllerIsInternal = true;
-      } else {
-        _controller = component.controller!;
-        _controllerIsInternal = false;
-      }
+      if (_controllerIsInternal) _controller.dispose();
+      _controllerIsInternal = component.controller == null;
+      _controller = component.controller ?? TextEditingController();
       _controller.addListener(_handleControllerChanged);
+      _syncAttachmentsFromText();
     }
   }
 
@@ -281,74 +289,246 @@ class FileTextFieldState extends State<FileTextField> {
 
   @override
   Component build(BuildContext context) {
-    final config = component.fileConfig ?? FileConfig.defaultConfig();
-    final tags = _attachedFiles.asMap().entries.map((entry) {
-      final index = entry.key;
-      final file = entry.value;
-      final style = config.styleFor(file);
-      return FileTag(
-        key: ValueKey(file.path),
-        file: file,
-        style: style,
-        index: file.type == FileType.image ? index + 1 : null,
-        onTap: (f) => _handleTagTap(f),
-      );
-    }).toList();
+    final showInlineTags = _attachedFiles.isNotEmpty && !component.obscureText;
+    final textField = TextField(
+      controller: _controller,
+      focused: component.focused,
+      onFocusChange: component.onFocusChange,
+      decoration: component.decoration,
+      style: showInlineTags
+          ? (component.style ?? const TextStyle()).copyWith(
+              color: const Color.fromARGB(0, 0, 0, 0),
+            )
+          : component.style,
+      placeholder: component.placeholder,
+      placeholderStyle: component.placeholderStyle,
+      textAlign: component.textAlign,
+      readOnly: component.readOnly,
+      obscureText: component.obscureText,
+      obscuringCharacter: component.obscuringCharacter,
+      maxLines: component.maxLines,
+      minLines: component.minLines,
+      maxLength: component.maxLength,
+      onChanged: null, // Handled via controller listener
+      onEditingComplete: component.onEditingComplete,
+      onSubmitted: component.onSubmitted,
+      onPaste: _handlePaste,
+      onKeyEvent: _handleKeyEvent,
+      enabled: component.enabled,
+      cursorColor: component.cursorColor,
+      cursorStyle: component.cursorStyle,
+      cursorBlinkRate: component.cursorBlinkRate,
+      selectionColor: component.selectionColor,
+      showCursor: showInlineTags ? false : component.showCursor,
+      width: component.width,
+      height: component.height,
+    );
 
-    final tray = tags.isEmpty
-        ? const SizedBox.shrink()
-        : Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(mainAxisSize: MainAxisSize.min, children: tags),
-              const SizedBox(height: 4),
-            ],
-          );
+    if (!showInlineTags) return textField;
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Stack(
       children: [
-        tray,
-        TextField(
-          controller: _controller,
-          focused: component.focused,
-          onFocusChange: component.onFocusChange,
-          decoration: component.decoration,
-          style: component.style,
-          placeholder: component.placeholder,
-          placeholderStyle: component.placeholderStyle,
-          textAlign: component.textAlign,
-          readOnly: component.readOnly,
-          obscureText: component.obscureText,
-          obscuringCharacter: component.obscuringCharacter,
-          maxLines: component.maxLines,
-          minLines: component.minLines,
-          maxLength: component.maxLength,
-          onChanged: null, // Handled via controller listener
-          onEditingComplete: component.onEditingComplete,
-          onSubmitted: component.onSubmitted,
-          onPaste: _handlePaste,
-          onKeyEvent: _handleKeyEvent,
-          enabled: component.enabled,
-          cursorColor: component.cursorColor,
-          cursorStyle: component.cursorStyle,
-          cursorBlinkRate: component.cursorBlinkRate,
-          selectionColor: component.selectionColor,
-          showCursor: component.showCursor,
-          width: component.width,
-          height: component.height,
+        textField,
+        GestureDetector(
+          onTapDown: _handleInlineTapDown,
+          child: RichText(
+            text: TextSpan(children: _buildInlineSpans(context)),
+            textAlign: component.textAlign,
+            softWrap: component.maxLines != 1,
+            overflow: TextOverflow.clip,
+            maxLines: component.maxLines,
+          ),
         ),
       ],
     );
   }
 
-  void _handleTagTap(FileInfo file) {
-    if (component.onFileClick != null) {
-      component.onFileClick!(file);
-    } else {
-      FileOpener.openLocation(file.path);
+  void _handleInlineTapDown(TapDownDetails details) {
+    final text = _controller.text;
+    final contentPadding = component.decoration?.contentPadding;
+    final hasDecoration =
+        component.decoration?.border != null ||
+        component.decoration?.fillColor != null;
+    final leftInset = hasDecoration ? 1 + (contentPadding?.left ?? 1) : 0;
+    final targetColumn = (details.localPosition.dx - leftInset).floor().clamp(
+      0,
+      text.length,
+    );
+    var column = 0;
+    var offset = 0;
+
+    for (final grapheme in text.characters) {
+      if (column >= targetColumn) break;
+      column += _terminalWidth(grapheme);
+      offset += grapheme.length;
     }
+    offset = offset.clamp(0, text.length);
+
+    for (final file in _attachedFiles) {
+      final token = FileTag.tokenFor(file, _styleFor(file));
+      final tokenStart = text.indexOf(token);
+      if (tokenStart >= 0 &&
+          offset >= tokenStart &&
+          offset < tokenStart + token.length) {
+        if (component.onFileClick != null) {
+          component.onFileClick!(file);
+        } else {
+          FileOpener.openLocation(file.path);
+        }
+        return;
+      }
+    }
+
+    _controller.selection = TextSelection.collapsed(offset: offset);
+    if (!component.focused) component.onFocusChange?.call(true);
+  }
+
+  int _terminalWidth(String grapheme) {
+    final rune = grapheme.runes.first;
+    if (rune >= 0x1100 &&
+        (rune <= 0x115f ||
+            rune == 0x2329 ||
+            rune == 0x232a ||
+            (rune >= 0x2e80 && rune <= 0xa4cf) ||
+            (rune >= 0xac00 && rune <= 0xd7a3) ||
+            (rune >= 0xf900 && rune <= 0xfaff) ||
+            (rune >= 0xfe10 && rune <= 0xfe6f) ||
+            (rune >= 0xff00 && rune <= 0xff60) ||
+            (rune >= 0xffe0 && rune <= 0xffe6) ||
+            (rune >= 0x1f300 && rune <= 0x1faff))) {
+      return 2;
+    }
+    return 1;
+  }
+
+  List<InlineSpan> _buildInlineSpans(BuildContext context) {
+    final text = _controller.text;
+    final selection = _controller.selection;
+    final selectionStart = selection.start.clamp(0, text.length);
+    final selectionEnd = selection.end.clamp(0, text.length);
+    final cursorOffset = component.focused && component.showCursor
+        ? selection.extentOffset.clamp(0, text.length)
+        : null;
+    final cursorColor = component.cursorColor ?? TuiTheme.of(context).primary;
+    final unstyledText = component.style ?? const TextStyle();
+    final selectionColor =
+        component.selectionColor ?? cursorColor.withOpacity(0.4);
+    final attachments = _attachedFiles.map((file) {
+      final style = _styleFor(file);
+      return (token: FileTag.tokenFor(file, style), style: style.toTextStyle());
+    }).toList();
+    final spans = <InlineSpan>[];
+    var offset = 0;
+
+    while (offset < text.length) {
+      var nextIndex = text.length;
+      var nextAttachment = -1;
+      for (var index = 0; index < attachments.length; index++) {
+        final found = text.indexOf(attachments[index].token, offset);
+        if (found >= 0 && found < nextIndex) {
+          nextIndex = found;
+          nextAttachment = index;
+        }
+      }
+
+      if (nextAttachment == -1) {
+        _appendStyledText(
+          spans,
+          text.substring(offset),
+          offset,
+          unstyledText,
+          selectionStart,
+          selectionEnd,
+          selectionColor,
+          cursorOffset,
+          cursorColor,
+        );
+        offset = text.length;
+      } else {
+        if (nextIndex > offset) {
+          _appendStyledText(
+            spans,
+            text.substring(offset, nextIndex),
+            offset,
+            unstyledText,
+            selectionStart,
+            selectionEnd,
+            selectionColor,
+            cursorOffset,
+            cursorColor,
+          );
+        }
+        final attachment = attachments.removeAt(nextAttachment);
+        _appendStyledText(
+          spans,
+          attachment.token,
+          nextIndex,
+          attachment.style,
+          selectionStart,
+          selectionEnd,
+          selectionColor,
+          cursorOffset,
+          cursorColor,
+        );
+        offset = nextIndex + attachment.token.length;
+      }
+    }
+
+    if (text.isEmpty && cursorOffset == 0) {
+      spans.add(
+        TextSpan(text: ' ', style: _cursorTextStyle(unstyledText, cursorColor)),
+      );
+    } else if (cursorOffset == text.length) {
+      spans.add(
+        TextSpan(text: ' ', style: _cursorTextStyle(unstyledText, cursorColor)),
+      );
+    }
+    return spans;
+  }
+
+  void _appendStyledText(
+    List<InlineSpan> spans,
+    String value,
+    int startOffset,
+    TextStyle baseStyle,
+    int selectionStart,
+    int selectionEnd,
+    Color selectionColor,
+    int? cursorOffset,
+    Color cursorColor,
+  ) {
+    var offset = startOffset;
+    for (final grapheme in value.characters) {
+      final selected =
+          selectionStart < offset + grapheme.length && selectionEnd > offset;
+      final style = selected
+          ? baseStyle.copyWith(backgroundColor: selectionColor)
+          : baseStyle;
+      final displayStyle = cursorOffset == offset
+          ? _cursorTextStyle(style, cursorColor)
+          : style;
+      spans.add(TextSpan(text: grapheme, style: displayStyle));
+      offset += grapheme.length;
+    }
+  }
+
+  TextStyle _cursorTextStyle(TextStyle style, Color cursorColor) {
+    if (component.cursorStyle == CursorStyle.underline) {
+      return TextStyle(
+        color: style.color,
+        backgroundColor: style.backgroundColor,
+        fontWeight: style.fontWeight,
+        decoration: TextDecoration.underline,
+      );
+    }
+    if (component.cursorStyle == CursorStyle.blockOutline) {
+      return TextStyle(
+        color: style.color,
+        backgroundColor: style.backgroundColor,
+        fontWeight: style.fontWeight,
+        decoration: TextDecoration.underline,
+      );
+    }
+    return TextStyle(color: Colors.black, backgroundColor: cursorColor);
   }
 }

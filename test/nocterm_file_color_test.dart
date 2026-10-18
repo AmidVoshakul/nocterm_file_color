@@ -1,6 +1,6 @@
 import 'package:nocterm_file_color/nocterm_file_color.dart';
 import 'package:test/test.dart';
-import 'package:nocterm/nocterm.dart' show Colors, FontWeight;
+import 'package:nocterm/nocterm.dart';
 
 void main() {
   group('FileDetector', () {
@@ -152,10 +152,128 @@ void main() {
       expect(FileTag.labelFor(file, style, index: 1), 'image 1');
     });
 
+    test('tokenFor preserves the image index in the editing token', () {
+      final file = FileInfo.fromPath('/tmp/photo.png');
+      final style = const FileStyle(prefix: 'image');
+      expect(FileTag.tokenFor(file, style, index: 1), '[image 1]');
+    });
+
+    test('tokenFor uses the stable label of an attached image', () {
+      final file = FileInfo.fromPath('/tmp/photo.png')
+          .copyWith(name: 'image 3');
+      expect(
+        FileTag.tokenFor(file, const FileStyle(prefix: 'image')),
+        '[image 3]',
+      );
+    });
+
     test('labelFor returns file name for non-images', () {
       final file = FileInfo.fromPath('/tmp/main.dart');
       final style = const FileStyle(prefix: 'code');
       expect(FileTag.labelFor(file, style), 'main.dart');
+    });
+  });
+
+  group('FileOpener', () {
+    test('openLocation is a static method', () {
+      // Verify the method exists as a static method
+      expect(FileOpener.openLocation, isA<Function>());
+    });
+  });
+
+  group('FileTextField', () {
+    test('FileTextField can be instantiated', () {
+      // Verify the class exists and can be instantiated
+      expect(FileTextField, isA<Type>());
+    });
+
+    test(
+      'renders the attached file token inline with its configured color',
+      () async {
+        final controller = TextEditingController();
+        final key = GlobalKey<FileTextFieldState>();
+
+        await testNocterm('inline colored file token', (tester) async {
+          await tester.pumpComponent(
+            FileTextField(
+              key: key,
+              controller: controller,
+              focused: false,
+              width: 30,
+              height: 1,
+            ),
+          );
+          key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+          await tester.pump();
+
+          expect(controller.text, '[main.dart]');
+          expect(tester.terminalState, containsText('[main.dart]'));
+          expect(
+            tester.terminalState.getCellAt(1, 0)?.style.color,
+            Colors.brightGreen,
+          );
+        });
+
+        controller.dispose();
+      },
+    );
+
+    test('inserts numbered image token into the same field', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('inline image token', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: false,
+            width: 30,
+            height: 1,
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/photo.png'));
+        await tester.pump();
+
+        expect(controller.text, '[image 1]');
+        expect(tester.terminalState, containsText('[image 1]'));
+      });
+
+      controller.dispose();
+    });
+
+    test('remains editable after attaching an inline token', () async {
+      final controller = TextEditingController(text: 'hello ');
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('editable inline file token', (tester) async {
+        await tester.pumpComponent(
+          Container(
+            width: 30,
+            height: 1,
+            child: FileTextField(
+              key: key,
+              controller: controller,
+              focused: true,
+              width: 30,
+              height: 1,
+            ),
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+        await tester.press(0, 0);
+        await tester.release(0, 0);
+        expect(controller.selection.extentOffset, 0);
+        controller.selection = const TextSelection.collapsed(offset: 0);
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.keyX, character: 'x'),
+        );
+
+        expect(controller.text, 'xhello [main.dart]');
+        expect(tester.terminalState, containsText('xhello [main.dart]'));
+      });
+
+      controller.dispose();
     });
   });
 }

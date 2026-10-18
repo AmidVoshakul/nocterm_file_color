@@ -8,6 +8,7 @@ environment:
 
 # Add regular dependencies here.
 dependencies:
+  characters: ^1.4.1
   nocterm: ^0.9.0
 
 dev_dependencies:

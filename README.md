@@ -4,10 +4,10 @@ A Nocterm TextField wrapper that displays attached files as colored inline tags.
 
 ## Features
 
-- **Inline file attachments** – attach files via paste, `@`-mention, drag & drop, or manual path input
-- **Color-coded tags** – files are shown as `[image 1]`, `[image 2]`, `[lib/main.dart]`, etc.
+- **Inline file attachments** – paste a file path or attach one programmatically
+- **Color-coded tokens** – `[image 1]` and `[lib/main.dart]` are colored in place in the input line
 - **Cross-platform** – works on Windows, macOS, and Linux
-- **Lightweight** – only depends on Nocterm's public APIs
+- **Lightweight** – uses Nocterm's public APIs without modifying framework internals
 
 ## Getting Started
 
@@ -48,10 +48,11 @@ See `example/nocterm_file_color_example.dart` for a complete runnable example.
 
 ## Architecture
 
-This package is a **wrapper** around Nocterm's `TextField`:
-- Does **not** modify Nocterm internals
-- Provides file attachment UI (tags) without interfering with text editing
-- Fully compatible with Nocterm updates (depends only on stable public API)
+This package wraps Nocterm's editable `TextField` and overlays `RichText` at the
+same position to paint attachment tokens with per-file colors. The controller
+continues to contain plain-text tokens, so normal editing and message submission
+remain available. It uses only Nocterm's public APIs and does not modify Nocterm
+internals.
 
 ## File Types & Colors
 
