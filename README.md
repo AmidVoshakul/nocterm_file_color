@@ -6,7 +6,7 @@ A Nocterm TextField wrapper that displays attached files as colored inline tags.
 
 - **Inline file attachments** – paste a file path or attach one programmatically
 - **Color-coded tokens** – `[image 1]` and `[lib/main.dart]` are colored in place in the input line
-- **Mention and command menu** – type `@` for mock files, folders, and agents, or `/` for mock commands
+- **Mention and command menu** – provide application-owned file, folder, agent, and command suggestions for `@` and `/`
 - **Cross-platform** – works on Windows, macOS, and Linux
 - **Lightweight** – uses Nocterm's public APIs without modifying framework internals
 

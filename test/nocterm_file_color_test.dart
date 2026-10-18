@@ -14,6 +14,7 @@ List<FileTextFieldSuggestion> _mockSuggestions(String trigger, String query) {
     suggestions = [
       FileTextFieldSuggestion.command(name: 'help', style: style),
       FileTextFieldSuggestion.command(name: 'clear', style: style),
+      FileTextFieldSuggestion.command(name: 'tmp', style: style),
     ];
   } else {
     const folderStyle = FileStyle(
@@ -275,6 +276,101 @@ void main() {
           );
 
           expect(controller.text, '@');
+        });
+
+        controller.dispose();
+      },
+    );
+
+    test(
+      'shows trigger text and preserves it when space closes the menu',
+      () async {
+        final controller = TextEditingController();
+
+        await testNocterm('visible mention trigger', (tester) async {
+          await tester.pumpComponent(
+            FileTextField(
+              controller: controller,
+              focused: true,
+              width: 30,
+              height: 1,
+              onSuggestionsRequested: _mockSuggestions,
+            ),
+          );
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+          );
+          expect(controller.text, '@');
+          expect(tester.terminalState, containsText('@'));
+
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.space, character: ' '),
+          );
+          expect(controller.text, '@ ');
+          expect(tester.terminalState, containsText('@ '));
+          expect(tester.terminalState, isNot(containsText('@explore')));
+        });
+
+        controller.dispose();
+      },
+    );
+
+    test('typing an email does not activate the mention menu', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('email remains plain input', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        for (final character in 'name@example.com'.split('')) {
+          await tester.sendKeyEvent(
+            KeyboardEvent(logicalKey: LogicalKey.keyA, character: character),
+          );
+        }
+
+        expect(controller.text, 'name@example.com');
+        expect(tester.terminalState, isNot(containsText('@explore')));
+      });
+
+      controller.dispose();
+    });
+
+    test(
+      'slash-prefixed path remains editable and submits when unmatched',
+      () async {
+        final controller = TextEditingController();
+        String? submitted;
+
+        await testNocterm('slash path does not get swallowed', (tester) async {
+          await tester.pumpComponent(
+            FileTextField(
+              controller: controller,
+              focused: true,
+              width: 50,
+              height: 1,
+              onSuggestionsRequested: _mockSuggestions,
+              onSubmitted: (value) => submitted = value,
+            ),
+          );
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+          );
+          expect(controller.text, '/');
+          for (final character in 'tmp/input.txt'.split('')) {
+            await tester.sendKeyEvent(
+              KeyboardEvent(logicalKey: LogicalKey.keyA, character: character),
+            );
+          }
+          await tester.sendEnter();
+
+          expect(controller.text, '/tmp/input.txt');
+          expect(submitted, '/tmp/input.txt');
         });
 
         controller.dispose();

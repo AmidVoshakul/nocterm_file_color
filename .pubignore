@@ -1,0 +1,7 @@
+AGENTS.md
+.mcp.json
+.opencode/
+.vscode/
+.codegraph/
+analysis_options.yaml
+test/

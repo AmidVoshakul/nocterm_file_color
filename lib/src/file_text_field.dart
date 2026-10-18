@@ -129,6 +129,7 @@ class FileTextFieldState extends State<FileTextField> {
   int _imageCounter = 0;
   String? _activeTrigger;
   String _suggestionQuery = '';
+  int _suggestionStartOffset = 0;
   List<FileTextFieldSuggestion> _providedSuggestions = const [];
   int _selectedSuggestionIndex = 0;
 
@@ -367,12 +368,18 @@ class FileTextFieldState extends State<FileTextField> {
   }
 
   void _openSuggestions(String trigger) {
+    final text = _controller.text;
+    _suggestionStartOffset = _controller.selection.extentOffset.clamp(
+      0,
+      text.length,
+    );
     setState(() {
       _activeTrigger = trigger;
       _suggestionQuery = '';
       _selectedSuggestionIndex = 0;
       _refreshSuggestions();
     });
+    _replaceSuggestionInput('');
   }
 
   bool _handleSuggestionKeyEvent(KeyboardEvent event) {
@@ -404,10 +411,13 @@ class FileTextFieldState extends State<FileTextField> {
     }
     if (event.logicalKey == LogicalKey.backspace) {
       if (_suggestionQuery.isEmpty) {
+        _removeSuggestionInput();
         _closeSuggestions();
       } else {
+        final query = _suggestionQuery.characters.skipLast(1).toString();
+        _replaceSuggestionInput(query);
         setState(() {
-          _suggestionQuery = _suggestionQuery.characters.skipLast(1).toString();
+          _suggestionQuery = query;
           _refreshSuggestions();
         });
       }
@@ -419,10 +429,17 @@ class FileTextFieldState extends State<FileTextField> {
         _closeSuggestions();
         return false;
       }
+      final query = '$_suggestionQuery${event.character!}';
+      _replaceSuggestionInput(query);
       setState(() {
-        _suggestionQuery += event.character!;
+        _suggestionQuery = query;
         _refreshSuggestions();
       });
+      if (_activeTrigger == '/' && query.contains('/')) {
+        _closeSuggestions();
+        return true;
+      }
+      if (_visibleSuggestions.isEmpty) _closeSuggestions();
       return true;
     }
     return false;
@@ -435,6 +452,28 @@ class FileTextFieldState extends State<FileTextField> {
       _providedSuggestions = const [];
       _selectedSuggestionIndex = 0;
     });
+  }
+
+  void _replaceSuggestionInput(String query) {
+    final text = _controller.text;
+    final start = _suggestionStartOffset.clamp(0, text.length);
+    final oldEnd = (start + 1 + _suggestionQuery.length).clamp(0, text.length);
+    final before = text.substring(0, start);
+    final after = text.substring(oldEnd);
+    final replacement = '$_activeTrigger$query';
+    _controller.text = '$before$replacement$after';
+    _controller.selection = TextSelection.collapsed(
+      offset: start + replacement.length,
+    );
+  }
+
+  void _removeSuggestionInput() {
+    final text = _controller.text;
+    final start = _suggestionStartOffset.clamp(0, text.length);
+    final end = (start + 1 + _suggestionQuery.length).clamp(0, text.length);
+    final newText = text.substring(0, start) + text.substring(end);
+    _controller.text = newText;
+    _controller.selection = TextSelection.collapsed(offset: start);
   }
 
   void _refreshSuggestions() {
@@ -454,6 +493,12 @@ class FileTextFieldState extends State<FileTextField> {
   }
 
   void _selectSuggestion(FileTextFieldSuggestion suggestion) {
+    final text = _controller.text;
+    final start = _suggestionStartOffset.clamp(0, text.length);
+    final end = (start + 1 + _suggestionQuery.length).clamp(0, text.length);
+    final withoutQuery = text.substring(0, start) + text.substring(end);
+    _controller.text = withoutQuery;
+    _controller.selection = TextSelection.collapsed(offset: start);
     _closeSuggestions();
     final file = suggestion.file;
     if (file != null) {
