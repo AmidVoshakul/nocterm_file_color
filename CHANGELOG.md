@@ -1,16 +1,9 @@
 ## 0.0.2
 
-### Features
-
-- `TokenHighlightTextField`: a Nocterm `TextField` wrapper that colors arbitrary inline tokens with per-token styles. It has no file-attachment bookkeeping, suggestion menu, or paste handling; the inner `TextField` and its callbacks (`onChanged`, `onSubmitted`) are forwarded unchanged, with selection highlighting and cursor emulation preserved.
-- `TokenText`: a stateless component that renders a plain string with inline tokens colored, without editing, cursor, or selection.
-- `InlineToken`: immutable public description of a colored inline token (`token` + `FileStyle`) with `==`/`hashCode`.
-- `FileStyle`: new `italic` and `underline` options that map to Nocterm font style and text decoration on inline tokens.
-- `FileTextField`: new optional `slashAnchor` parameter (`SlashAnchor.anywhere` default, new `SlashAnchor.startOnly`) controlling where the `/` command menu may open; the default preserves 0.0.1 behavior and the `@` mention menu is unaffected.
-
-### Refactor
-
-- The inline token span machinery was extracted into a shared internal renderer used by `FileTextField`, `TokenHighlightTextField`, and `TokenText`. `FileTextField`'s public API and behavior are unchanged.
+- **Token components**: `TokenHighlightTextField` and `TokenText` color arbitrary strings — `@mentions`, `/commands`, or any token — inline; each `InlineToken` entry colors one occurrence of its token string.
+- **FileStyle**: new `italic` and `underline` options next to `bold`.
+- **slashAnchor**: `FileTextField` accepts `SlashAnchor.startOnly` to open the `/` menu only at the very start of the field text; the default (`SlashAnchor.anywhere`) preserves 0.0.1 behavior.
+- **Shared rendering**: the inline span machinery is now shared between `FileTextField` and the new token components; `FileTextField` behavior is unchanged.
 
 ## 0.0.1
 

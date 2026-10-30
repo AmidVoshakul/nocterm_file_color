@@ -1,139 +1,129 @@
-# nocterm_file_color
+A Nocterm `TextField` wrapper that displays attached files and colored tokens
+inline in the input line.
 
-A Nocterm TextField wrapper that displays attached files as colored inline tags.
+<img src="https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/screenshots/input.png" alt="Agent mentions, slash commands, and file tokens colored inline in the input field" width="720">
 
 ## Features
 
-- **Inline file attachments** – paste a file path or attach one programmatically
-- **Color-coded tokens** – `[image 1]` and `[lib/main.dart]` are colored in place in the input line
-- **Mention and command menu** – provide application-owned file, folder, agent, and command suggestions for `@` and `/`
-- **Cross-platform** – works on Windows, macOS, and Linux
-- **Lightweight** – uses Nocterm's public APIs without modifying framework internals
+- **Inline file attachments** – paste a path or attach programmatically;
+  `[lib/main.dart]` and `[image 1]` labels are colored in place; Backspace
+  removes a token and detaches the file as one unit.
+- **Colored tokens** – `InlineToken` entries paint `@mentions`, `/commands`, or
+  any substring; styles support colors, `bold`, `italic`, `underline`, and
+  square, custom, or no brackets around the label.
+- **Host-owned suggestion menus** – the application supplies `@` and `/`
+  candidates (`FileTextFieldSuggestion.file`, `.folder`, `.agent`, `.command`);
+  the field filters, selects, and inserts them.
+- **Optional `/` anchor** – `slashAnchor: SlashAnchor.startOnly` restricts the
+  slash menu to the very start of the field; the default opens it at any word
+  boundary.
+- **Token components** – `TokenHighlightTextField` for editable input and
+  `TokenText` for read-only previews.
 
 ## Getting Started
-
-Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
   nocterm: ^0.9.0
-  nocterm_file_color: ^0.0.1
-```
-
-Then run:
-
-```bash
-dart pub get
+  nocterm_file_color: ^0.0.2
 ```
 
 ## Usage
 
-File and special-token suggestions belong to the host application. Supply them
-through `onSuggestionsRequested`; the field handles filtering, keyboard/mouse
+File and token suggestions belong to the host application. Supply them through
+`onSuggestionsRequested`; the field handles filtering, keyboard and mouse
 selection, and colored inline rendering.
 
 ```dart
 import 'package:nocterm/nocterm.dart';
 import 'package:nocterm_file_color/nocterm_file_color.dart';
 
-final config = FileConfig.defaultConfig();
-
-final fileTextField = FileTextField(
-  fileConfig: config,
+final input = FileTextField(
   onSuggestionsRequested: (trigger, query) {
     if (trigger == '/') {
       return [
         FileTextFieldSuggestion.command(
           name: 'help',
-          style: const FileStyle(
-            text: Colors.brightMagenta,
-            background: Colors.magenta,
-            openingDelimiter: '',
-            closingDelimiter: '',
-          ),
+          style: const FileStyle(bold: true),
         ),
       ];
     }
-    return [
-      FileTextFieldSuggestion.agent(
-        name: 'explore',
-        style: const FileStyle(text: Colors.brightCyan),
-      ),
-    ];
+    return [FileTextFieldSuggestion.agent(name: 'explore')];
   },
   onSuggestionSelected: (suggestion) {
-    // The host application decides what an agent or command should do.
-  },
-  suggestionMenuBuilder: (context, suggestions, selectedIndex, onSelected) {
-    // Optionally return any Nocterm component for a custom menu.
-    return Column(
-      children: [
-        for (final suggestion in suggestions)
-          GestureDetector(
-            onTap: () => onSelected(suggestion),
-            child: Text(suggestion.displayLabel),
-          ),
-      ],
-    );
-  },
-  onFileClick: (file) {
-    // Default: open file location in OS file manager
-    FileOpener.openLocation(file.path);
+    // The host decides what a command or agent should do.
   },
   onFilesChanged: (files) {
-    // Handle file attachment changes
+    // Attached files, ready to send to your model.
   },
 );
 ```
 
+## Coloring tokens
+
+Beyond files, arbitrary strings are colored by `InlineToken` entries. Each
+entry colors one occurrence of its token string (the leftmost match not yet
+colored), so register one entry per inserted label.
+
+```dart
+const tokens = [
+  InlineToken(
+    token: '@explore',
+    style: FileStyle(text: Colors.brightCyan, openingDelimiter: ''),
+  ),
+  InlineToken(
+    token: '/help',
+    style: FileStyle(text: Colors.brightMagenta, openingDelimiter: ''),
+  ),
+];
+
+// Editable input with colored tokens.
+TokenHighlightTextField(controller: controller, tokens: tokens);
+
+// Read-only preview for transcripts and lists.
+TokenText(text: 'Run @explore or /help', tokens: tokens);
+```
+
+Token styles accept foreground and background colors, `bold`, `italic`, and
+`underline`. Delimiters wrap the token label; the default is `[` and `]`, any
+other string works, and empty strings render the bare token text:
+
+```dart
+FileStyle()                                              // → [lib/main.dart]
+FileStyle(openingDelimiter: '<', closingDelimiter: '>')  // → <lib/main.dart>
+FileStyle(openingDelimiter: '', closingDelimiter: '')    // →  lib/main.dart
+```
+
+## Suggestions
+
+- `FileTextFieldSuggestion.file` inserts a colored token and registers an
+  attachment, retrievable via `getAttachedFiles()`; `.folder`, `.agent`, and
+  `.command` insert app-specific tokens only.
+- Clicking a colored file token reports `onFileClick`, or opens the file
+  location in the platform file manager by default.
+- The provider receives `@` or `/` plus the query; the field filters the
+  returned candidates case-insensitively by `name` and `searchText`.
+- `FileStyle` colors the inserted token; menu labels render neutrally unless
+  a `suggestionMenuBuilder` provides a custom menu component.
+- `onSuggestionSelected` reports the selection to the host; the package never
+  executes agents or commands.
+
+## Default file colors
+
+| Type | Color |
+|------|-------|
+| Image | Magenta |
+| Document | Blue |
+| Code | Green |
+| Archive | Yellow |
+| Audio / Video | Cyan |
+| Other | Grey |
+
+Tune defaults per type and overrides per extension with `FileConfig`.
+
 ## Example
 
-See `example/nocterm_file_color_example.dart` for a complete runnable example.
-The demo suggestion catalog is local mock data; it does not scan the filesystem
-or execute agents and commands.
-
-### Suggestion items
-
-- Use `FileTextFieldSuggestion.file(file, style: ...)` for an actual attachment.
-  Selecting it inserts the colored token and adds the file to `getAttachedFiles()`.
-- Use `.folder(...)`, `.agent(...)`, or `.command(...)` for app-specific tokens.
-  These are inserted into the text but are not treated as file attachments.
-- `FileStyle.text`, `background`, `openingDelimiter`, and `closingDelimiter`
-  configure the inline token only. Empty delimiters omit the default brackets;
-  suggestion menu labels are rendered neutrally by the package.
-- The provider receives `@` or `/` and the current query. It may return the full
-  candidate list; the field applies a case-insensitive filter using each item's
-  `name` and optional `searchText`.
-- `onSuggestionSelected` reports the selected item to the host. It does not
-  execute an agent or command.
-- By default, suggestion labels are plain, uncolored text. Provide
-  `suggestionMenuBuilder` to fully customize the menu component; token styles
-  still affect only the selected inline token.
-
-## Architecture
-
-This package wraps Nocterm's editable `TextField` and overlays `RichText` at the
-same position to paint attachment tokens with per-file colors. The controller
-continues to contain plain-text tokens, so normal editing and message submission
-remain available. It uses only Nocterm's public APIs and does not modify Nocterm
-internals.
-
-## File Types & Colors
-
-| Type | Text Color | Background |
-|------|------------|------------|
-| Image | Magenta | Magenta |
-| Document | Blue | Blue |
-| Code | Green | Green |
-| Archive | Yellow | Yellow |
-| Audio/Video | Cyan | Cyan |
-| Other | Grey | Grey |
-
-## Integration
-
-1. Add `nocterm_file_color` as a dependency
-2. Configure `FileConfig` for custom colors if needed
-3. Register `onFileClick` and `onFilesChanged` callbacks
+See `example/nocterm_file_color_example.dart` for a complete runnable demo.
 
 ## License
 
