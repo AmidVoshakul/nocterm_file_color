@@ -6,15 +6,16 @@ import 'token_spans.dart';
 /// A [TextField] wrapper that colors arbitrary inline tokens.
 ///
 /// Unlike [FileTextField], this component has no file-attachment bookkeeping,
-/// no suggestion menu, and no paste handling. It only colors occurrences of the
-/// supplied [tokens] inline while leaving the controller's plain text and the
-/// inner [TextField]'s behavior untouched.
+/// no suggestion menu, and no paste handling. It only colors the supplied
+/// [tokens] inline while leaving the controller's plain text and the inner
+/// [TextField]'s behavior untouched. Each token entry colors one occurrence of
+/// its token string; register one entry per colored label.
 ///
 /// When [tokens] is empty or [obscureText] is true, the field renders as a
 /// plain forwarded [TextField] with no overlay. Otherwise a transparent inner
-/// [TextField] is overlaid with [RichText] so every occurrence of each token is
-/// painted with its [InlineToken.style], including selection highlighting and
-/// cursor emulation when focused.
+/// [TextField] is overlaid with [RichText] so each token entry paints one
+/// occurrence of its token with its [InlineToken.style], including selection
+/// highlighting and cursor emulation when focused.
 ///
 /// [onChanged] follows the plain [TextField] contract: it is invoked exactly
 /// once per controller change (by the inner field, both for user edits and
@@ -25,8 +26,8 @@ class TokenHighlightTextField extends StatefulComponent {
   ///
   /// All [TextField] parameters are forwarded to the internal [TextField].
   /// Additional parameters:
-  /// - [tokens]: the inline tokens to color; every occurrence of each
-  ///   [InlineToken.token] is painted with its [InlineToken.style].
+  /// - [tokens]: the inline tokens to color; each entry colors one occurrence
+  ///   of its token string.
   const TokenHighlightTextField({
     super.key,
     this.controller,
@@ -94,8 +95,9 @@ class TokenHighlightTextField extends StatefulComponent {
   final double? width;
   final double? height;
 
-  /// Tokens to color inline. Every occurrence of each [InlineToken.token] is
-  /// painted with its [InlineToken.style].
+  /// Tokens to color inline. Each entry colors one occurrence of its
+  /// [InlineToken.token]: the leftmost match in the text not yet colored.
+  /// Register one entry per colored label.
   final List<InlineToken> tokens;
 
   @override

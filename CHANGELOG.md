@@ -6,6 +6,7 @@
 - `TokenText`: a stateless component that renders a plain string with inline tokens colored, without editing, cursor, or selection.
 - `InlineToken`: immutable public description of a colored inline token (`token` + `FileStyle`) with `==`/`hashCode`.
 - `FileStyle`: new `italic` and `underline` options that map to Nocterm font style and text decoration on inline tokens.
+- `FileTextField`: new optional `slashAnchor` parameter (`SlashAnchor.anywhere` default, new `SlashAnchor.startOnly`) controlling where the `/` command menu may open; the default preserves 0.0.1 behavior and the `@` mention menu is unaffected.
 
 ### Refactor
 

@@ -4,13 +4,11 @@ import 'package:nocterm/nocterm.dart';
 import 'file_config.dart';
 import 'inline_token.dart';
 
-/// Builds inline spans for [text], coloring every occurrence of each token in
-/// [tokens] with its [FileStyle].
-///
-/// Every occurrence of a token string is colored once, consuming one
-/// [InlineToken] entry per match (leftmost match wins, then the entry is
-/// consumed). Selection highlighting and block/underline cursor emulation are
-/// applied on top of the token colors.
+/// Builds inline spans for [text], coloring the text occurrences matched by
+/// [tokens] with their [FileStyle]. Each [InlineToken] entry colors exactly
+/// one occurrence: leftmost match wins and the entry is consumed. Register
+/// one entry per colored label. Selection highlighting and block/underline
+/// cursor emulation are applied on top of the token colors.
 ///
 /// This is an internal implementation detail shared by
 /// [TokenHighlightTextField], [TokenText], and [FileTextField]. It is not part

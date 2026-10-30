@@ -315,6 +315,96 @@ void main() {
       },
     );
 
+    test('default slash menu opens mid-text at word boundary', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('slash mid-text default', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        for (final character in 'hi'.split('')) {
+          await tester.sendKeyEvent(
+            KeyboardEvent(logicalKey: LogicalKey.keyA, character: character),
+          );
+        }
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.space, character: ' '),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+
+        expect(controller.text, 'hi /');
+        expect(tester.terminalState, containsText('/help'));
+      });
+
+      controller.dispose();
+    });
+
+    test('slashAnchor startOnly keeps mid-text slash plain', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('slash mid-text startOnly', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            slashAnchor: SlashAnchor.startOnly,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        for (final character in 'hi'.split('')) {
+          await tester.sendKeyEvent(
+            KeyboardEvent(logicalKey: LogicalKey.keyA, character: character),
+          );
+        }
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.space, character: ' '),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+
+        expect(controller.text, 'hi /');
+        expect(tester.terminalState, isNot(containsText('/help')));
+      });
+
+      controller.dispose();
+    });
+
+    test('slashAnchor startOnly opens slash menu at field start', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('slash at start startOnly', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            slashAnchor: SlashAnchor.startOnly,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+
+        expect(controller.text, '/');
+        expect(tester.terminalState, containsText('/help'));
+      });
+
+      controller.dispose();
+    });
+
     test('typing an email does not activate the mention menu', () async {
       final controller = TextEditingController();
 

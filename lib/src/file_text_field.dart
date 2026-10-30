@@ -17,6 +17,17 @@ class _InlineToken {
   final FileInfo? file;
 }
 
+/// Where the `/` command menu may open inside a [FileTextField].
+enum SlashAnchor {
+  /// `/` opens the menu at any word boundary in the text. Default; matches
+  /// 0.0.1 behavior.
+  anywhere,
+
+  /// `/` opens the menu only when the cursor is at the very start of the
+  /// field text (offset 0), the way most chat apps treat commands.
+  startOnly,
+}
+
 /// A [TextField] wrapper that displays attached files as colored inline tags.
 ///
 /// Files can be attached via paste, an application-provided suggestion menu,
@@ -71,6 +82,7 @@ class FileTextField extends StatefulComponent {
     this.onSuggestionsRequested,
     this.onSuggestionSelected,
     this.suggestionMenuBuilder,
+    this.slashAnchor = SlashAnchor.anywhere,
   }) : assert(maxLines == null || maxLines > 0),
        assert(minLines == null || minLines > 0),
        assert(
@@ -117,6 +129,11 @@ class FileTextField extends StatefulComponent {
   final FileTextFieldSuggestionProvider? onSuggestionsRequested;
   final ValueChanged<FileTextFieldSuggestion>? onSuggestionSelected;
   final FileTextFieldSuggestionMenuBuilder? suggestionMenuBuilder;
+
+  /// Where the `/` command menu may open. Only affects the `/` trigger; the
+  /// `@` mention trigger always works at word boundaries. Defaults to
+  /// [SlashAnchor.anywhere], preserving 0.0.1 behavior.
+  final SlashAnchor slashAnchor;
 
   @override
   State<FileTextField> createState() => FileTextFieldState();
@@ -350,7 +367,7 @@ class FileTextFieldState extends State<FileTextField> {
 
     if ((event.logicalKey == LogicalKey.slash || event.character == '/') &&
         component.onSuggestionsRequested != null &&
-        _isTriggerBoundary()) {
+        _isSlashTriggerActive()) {
       _openSuggestions('/');
       return true;
     }
@@ -367,6 +384,19 @@ class FileTextFieldState extends State<FileTextField> {
       _controller.text.length,
     );
     return offset == 0 || _controller.text[offset - 1].trim().isEmpty;
+  }
+
+  bool _isSlashTriggerActive() {
+    switch (component.slashAnchor) {
+      case SlashAnchor.anywhere:
+        return _isTriggerBoundary();
+      case SlashAnchor.startOnly:
+        return _controller.selection.extentOffset.clamp(
+              0,
+              _controller.text.length,
+            ) ==
+            0;
+    }
   }
 
   void _openSuggestions(String trigger) {

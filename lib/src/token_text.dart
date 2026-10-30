@@ -9,13 +9,14 @@ import 'token_spans.dart';
 /// cursor, no selection, and no editing behavior. Use it to render colored
 /// preview lines, for example in a read-only transcript or suggestion list.
 ///
-/// Every occurrence of each [InlineToken.token] is painted with its
-/// [InlineToken.style] over the base [style].
+/// Each [InlineToken] entry colors one occurrence of its token string with
+/// its [InlineToken.style] over the base [style]; register one entry per
+/// colored label.
 class TokenText extends StatelessComponent {
   /// Creates a colored token text preview.
   ///
-  /// [text] is required. [tokens] are colored inline; every occurrence of each
-  /// token string is painted with its style. [style] is the base text style.
+  /// [text] is required. [tokens] are colored inline; each entry colors one
+  /// occurrence of its token string. [style] is the base text style.
   const TokenText({
     super.key,
     required this.text,
@@ -31,8 +32,9 @@ class TokenText extends StatelessComponent {
   /// The text to render.
   final String text;
 
-  /// Tokens to color inline. Every occurrence of each [InlineToken.token] is
-  /// painted with its [InlineToken.style].
+  /// Tokens to color inline. Each entry colors one occurrence of its
+  /// [InlineToken.token]: the leftmost match in the text not yet colored.
+  /// Register one entry per colored label.
   final List<InlineToken> tokens;
 
   /// Base text style applied to the whole run; token styles override it for
