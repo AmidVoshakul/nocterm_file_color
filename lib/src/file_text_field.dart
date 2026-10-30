@@ -6,6 +6,8 @@ import 'file_info.dart';
 import 'file_opener.dart';
 import 'file_tag.dart';
 import 'file_text_field_suggestion.dart';
+import 'inline_token.dart';
+import 'token_spans.dart';
 
 class _InlineToken {
   const _InlineToken({required this.token, required this.style, this.file});
@@ -618,13 +620,38 @@ class FileTextFieldState extends State<FileTextField> {
 
     Component input = textField;
     if (showInlineTags) {
+      final text = _controller.text;
+      final selection = _controller.selection;
+      final cursorColor = component.cursorColor ?? TuiTheme.of(context).primary;
       input = Stack(
         children: [
           textField,
           GestureDetector(
             onTapDown: _handleInlineTapDown,
             child: RichText(
-              text: TextSpan(children: _buildInlineSpans(context)),
+              text: TextSpan(
+                children: buildInlineSpans(
+                  text: text,
+                  tokens: _inlineTokens
+                      .map(
+                        (inlineToken) => InlineToken(
+                          token: inlineToken.token,
+                          style: inlineToken.style,
+                        ),
+                      )
+                      .toList(),
+                  selectionStart: selection.start.clamp(0, text.length),
+                  selectionEnd: selection.end.clamp(0, text.length),
+                  cursorOffset: component.focused && component.showCursor
+                      ? selection.extentOffset.clamp(0, text.length)
+                      : null,
+                  cursorColor: cursorColor,
+                  baseStyle: component.style ?? const TextStyle(),
+                  selectionColor:
+                      component.selectionColor ?? cursorColor.withOpacity(0.4),
+                  cursorStyle: component.cursorStyle,
+                ),
+              ),
               textAlign: component.textAlign,
               softWrap: component.maxLines != 1,
               overflow: TextOverflow.clip,
@@ -740,140 +767,5 @@ class FileTextFieldState extends State<FileTextField> {
       return 2;
     }
     return 1;
-  }
-
-  List<InlineSpan> _buildInlineSpans(BuildContext context) {
-    final text = _controller.text;
-    final selection = _controller.selection;
-    final selectionStart = selection.start.clamp(0, text.length);
-    final selectionEnd = selection.end.clamp(0, text.length);
-    final cursorOffset = component.focused && component.showCursor
-        ? selection.extentOffset.clamp(0, text.length)
-        : null;
-    final cursorColor = component.cursorColor ?? TuiTheme.of(context).primary;
-    final unstyledText = component.style ?? const TextStyle();
-    final selectionColor =
-        component.selectionColor ?? cursorColor.withOpacity(0.4);
-    final attachments = _inlineTokens
-        .map(
-          (inlineToken) => (
-            token: inlineToken.token,
-            style: inlineToken.style.toTextStyle(),
-          ),
-        )
-        .toList();
-    final spans = <InlineSpan>[];
-    var offset = 0;
-
-    while (offset < text.length) {
-      var nextIndex = text.length;
-      var nextAttachment = -1;
-      for (var index = 0; index < attachments.length; index++) {
-        final found = text.indexOf(attachments[index].token, offset);
-        if (found >= 0 && found < nextIndex) {
-          nextIndex = found;
-          nextAttachment = index;
-        }
-      }
-
-      if (nextAttachment == -1) {
-        _appendStyledText(
-          spans,
-          text.substring(offset),
-          offset,
-          unstyledText,
-          selectionStart,
-          selectionEnd,
-          selectionColor,
-          cursorOffset,
-          cursorColor,
-        );
-        offset = text.length;
-      } else {
-        if (nextIndex > offset) {
-          _appendStyledText(
-            spans,
-            text.substring(offset, nextIndex),
-            offset,
-            unstyledText,
-            selectionStart,
-            selectionEnd,
-            selectionColor,
-            cursorOffset,
-            cursorColor,
-          );
-        }
-        final attachment = attachments.removeAt(nextAttachment);
-        _appendStyledText(
-          spans,
-          attachment.token,
-          nextIndex,
-          attachment.style,
-          selectionStart,
-          selectionEnd,
-          selectionColor,
-          cursorOffset,
-          cursorColor,
-        );
-        offset = nextIndex + attachment.token.length;
-      }
-    }
-
-    if (text.isEmpty && cursorOffset == 0) {
-      spans.add(
-        TextSpan(text: ' ', style: _cursorTextStyle(unstyledText, cursorColor)),
-      );
-    } else if (cursorOffset == text.length) {
-      spans.add(
-        TextSpan(text: ' ', style: _cursorTextStyle(unstyledText, cursorColor)),
-      );
-    }
-    return spans;
-  }
-
-  void _appendStyledText(
-    List<InlineSpan> spans,
-    String value,
-    int startOffset,
-    TextStyle baseStyle,
-    int selectionStart,
-    int selectionEnd,
-    Color selectionColor,
-    int? cursorOffset,
-    Color cursorColor,
-  ) {
-    var offset = startOffset;
-    for (final grapheme in value.characters) {
-      final selected =
-          selectionStart < offset + grapheme.length && selectionEnd > offset;
-      final style = selected
-          ? baseStyle.copyWith(backgroundColor: selectionColor)
-          : baseStyle;
-      final displayStyle = cursorOffset == offset
-          ? _cursorTextStyle(style, cursorColor)
-          : style;
-      spans.add(TextSpan(text: grapheme, style: displayStyle));
-      offset += grapheme.length;
-    }
-  }
-
-  TextStyle _cursorTextStyle(TextStyle style, Color cursorColor) {
-    if (component.cursorStyle == CursorStyle.underline) {
-      return TextStyle(
-        color: style.color,
-        backgroundColor: style.backgroundColor,
-        fontWeight: style.fontWeight,
-        decoration: TextDecoration.underline,
-      );
-    }
-    if (component.cursorStyle == CursorStyle.blockOutline) {
-      return TextStyle(
-        color: style.color,
-        backgroundColor: style.backgroundColor,
-        fontWeight: style.fontWeight,
-        decoration: TextDecoration.underline,
-      );
-    }
-    return TextStyle(color: Colors.black, backgroundColor: cursorColor);
   }
 }

@@ -6,15 +6,17 @@ import 'file_info.dart';
 /// Visual appearance of a [FileTag].
 ///
 /// A style bundles foreground/background colors, the image label prefix, font
-/// weight, and optional delimiters for a colored token. Empty delimiters render
-/// the label without brackets. Colors and delimiters affect the inline token,
-/// not the host application's suggestion menu.
+/// weight, italic and underline, and optional delimiters for a colored token.
+/// Empty delimiters render the label without brackets. Colors and delimiters
+/// affect the inline token, not the host application's suggestion menu.
 class FileStyle {
   const FileStyle({
     this.text,
     this.background,
     this.prefix,
     this.bold = false,
+    this.italic = false,
+    this.underline = false,
     this.openingDelimiter = '[',
     this.closingDelimiter = ']',
   });
@@ -35,6 +37,15 @@ class FileStyle {
   /// Whether the tag text is rendered bold.
   final bool bold;
 
+  /// Whether the tag text is rendered italic.
+  ///
+  /// Rendering depends on the terminal emulator honoring the italic SGR
+  /// attribute; colors are always safe.
+  final bool italic;
+
+  /// Whether the tag text is rendered underlined.
+  final bool underline;
+
   /// Text placed before a colored token. Set to an empty string to omit it.
   final String openingDelimiter;
 
@@ -47,6 +58,8 @@ class FileStyle {
     Color? background,
     String? prefix,
     bool? bold,
+    bool? italic,
+    bool? underline,
     String? openingDelimiter,
     String? closingDelimiter,
   }) {
@@ -55,6 +68,8 @@ class FileStyle {
       background: background ?? this.background,
       prefix: prefix ?? this.prefix,
       bold: bold ?? this.bold,
+      italic: italic ?? this.italic,
+      underline: underline ?? this.underline,
       openingDelimiter: openingDelimiter ?? this.openingDelimiter,
       closingDelimiter: closingDelimiter ?? this.closingDelimiter,
     );
@@ -66,6 +81,8 @@ class FileStyle {
       color: text,
       backgroundColor: background,
       fontWeight: bold ? FontWeight.bold : null,
+      fontStyle: italic ? FontStyle.italic : null,
+      decoration: underline ? TextDecoration.underline : null,
     );
   }
 
@@ -77,6 +94,8 @@ class FileStyle {
         other.background == background &&
         other.prefix == prefix &&
         other.bold == bold &&
+        other.italic == italic &&
+        other.underline == underline &&
         other.openingDelimiter == openingDelimiter &&
         other.closingDelimiter == closingDelimiter;
   }
@@ -87,6 +106,8 @@ class FileStyle {
     background,
     prefix,
     bold,
+    italic,
+    underline,
     openingDelimiter,
     closingDelimiter,
   );

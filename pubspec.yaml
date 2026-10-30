@@ -1,6 +1,6 @@
 name: nocterm_file_color
-description: A Nocterm TextField wrapper that displays attached files as colored inline tags.
-version: 0.0.1
+description: A Nocterm TextField wrapper that displays files and other tokens as colored inline tags.
+version: 0.0.2
 repository: https://github.com/AmidVoshakul/nocterm_file_color
 
 environment:

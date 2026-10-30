@@ -12,9 +12,12 @@ The approach is a **widget wrapper `FileTextField`** (NOT a fork of Nocterm). Wr
 
 ### Components
 - `FileTextField` — wrapper over `TextField`; accepts parameters `TextField` + `fileConfig`, `onFileClick`, `onFilesChanged`; method `getAttachedFiles()`.
+- `TokenHighlightTextField` — coloring-only wrapper over `TextField`; colors every occurrence of each `InlineToken` inline (transparent field + `RichText` overlay with selection/cursor emulation); no attachments, no menus, no paste; `onChanged` fires exactly once per controller change (inner field contract).
+- `TokenText` — stateless read-only rendering of a `String` with colored `InlineToken`s (preview lines, lists).
+- `InlineToken` — immutable `{token, FileStyle}` record with `==`/`hashCode`.
 - `FileTag` - color tag `[type name]`, clickable.
 - `FileConfig` - extension map → `FileStyle` (flexible color settings).
-- `FileStyle` - `text` (text color), `background` (background color), `prefix` (eg `image`, `document`).
+- `FileStyle` - `text` (text color), `background` (background color), `prefix` (eg `image`, `document`), plus font knobs `bold`, `italic`, `underline`.
 - `FileDetector` - determining the file type by extension → `detectType(extension)`.
 - `FileInfo` - model: `path`, `name`, `extension`, `type`, `size`.
 - `FileOpener` - cross-platform opening of a file location in the OS (`xdg-open`/`open`/`explorer`).
@@ -29,6 +32,10 @@ The approach is a **widget wrapper `FileTextField`** (NOT a fork of Nocterm). Wr
 lib/
   src/
     file_text_field.dart # widget wrapper over TextField
+    token_highlight_text_field.dart # coloring-only wrapper over TextField
+    token_text.dart # stateless read-only colored token text
+    inline_token.dart # immutable {token, FileStyle}
+    token_spans.dart # internal shared span renderer (not exported)
     file_tag.dart # color tag [type name]
     file_config.dart # configuration of colors by extensions
     file_detector.dart # type detection by extension

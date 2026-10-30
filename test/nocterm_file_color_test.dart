@@ -857,4 +857,452 @@ void main() {
       controller.dispose();
     });
   });
+
+  group('InlineToken', () {
+    test('equality is based on token and style', () {
+      const a = InlineToken(
+        token: '@x',
+        style: FileStyle(text: Colors.red),
+      );
+      const b = InlineToken(
+        token: '@x',
+        style: FileStyle(text: Colors.red),
+      );
+      const c = InlineToken(
+        token: '@y',
+        style: FileStyle(text: Colors.red),
+      );
+      expect(a, equals(b));
+      expect(a, isNot(equals(c)));
+    });
+  });
+
+  group('FileStyle', () {
+    test('equality includes italic and underline', () {
+      const full = FileStyle(text: Colors.cyan, italic: true, underline: true);
+      const same = FileStyle(text: Colors.cyan, italic: true, underline: true);
+      const plain = FileStyle(text: Colors.cyan);
+      const italicOnly = FileStyle(text: Colors.cyan, italic: true);
+      const underlineOnly = FileStyle(text: Colors.cyan, underline: true);
+
+      expect(full, equals(same));
+      expect(full.hashCode, same.hashCode);
+      expect(full, isNot(equals(plain)));
+      expect(full, isNot(equals(italicOnly)));
+      expect(full, isNot(equals(underlineOnly)));
+    });
+  });
+
+  group('TokenHighlightTextField', () {
+    test('can be instantiated', () {
+      expect(TokenHighlightTextField, isA<Type>());
+    });
+
+    test('colors an inline token occurrence', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('colored token', (tester) async {
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: controller,
+            focused: false,
+            width: 30,
+            height: 1,
+            tokens: [
+              InlineToken(
+                token: '@explore',
+                style: FileStyle(
+                  text: Colors.brightCyan,
+                  background: Colors.cyan,
+                  bold: true,
+                ),
+              ),
+            ],
+          ),
+        );
+        controller.text = 'use @explore now';
+        controller.selection = const TextSelection.collapsed(offset: 0);
+        await tester.pump();
+
+        expect(tester.terminalState, containsText('@explore'));
+        // 'use @explore now' -> '@' starts at column 4
+        expect(
+          tester.terminalState.getCellAt(4, 0)?.style.color,
+          Colors.brightCyan,
+        );
+      });
+
+      controller.dispose();
+    });
+
+    test('plain text stays neutral without tokens', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('plain text neutral', (tester) async {
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: controller,
+            focused: false,
+            width: 30,
+            height: 1,
+          ),
+        );
+        controller.text = 'hello world';
+        await tester.pump();
+
+        expect(tester.terminalState, containsText('hello world'));
+        expect(tester.terminalState.getCellAt(0, 0)?.style.color, isNull);
+      });
+
+      controller.dispose();
+    });
+
+    test('token coloring disappears when token is deleted', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('token removed on delete', (tester) async {
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: controller,
+            focused: false,
+            width: 30,
+            height: 1,
+            tokens: [
+              InlineToken(
+                token: '@explore',
+                style: FileStyle(text: Colors.brightCyan),
+              ),
+            ],
+          ),
+        );
+        controller.text = 'use @explore now';
+        await tester.pump();
+
+        expect(tester.terminalState, containsText('@explore'));
+        expect(
+          tester.terminalState.getCellAt(4, 0)?.style.color,
+          Colors.brightCyan,
+        );
+
+        controller.text = 'use now';
+        await tester.pump();
+
+        expect(tester.terminalState, isNot(containsText('@explore')));
+        expect(
+          tester.terminalState.getCellAt(4, 0)?.style.color,
+          isNot(Colors.brightCyan),
+        );
+      });
+
+      controller.dispose();
+    });
+
+    test('every occurrence of a duplicate token is colored', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('duplicate tokens colored', (tester) async {
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: controller,
+            focused: false,
+            width: 30,
+            height: 1,
+            tokens: [
+              InlineToken(
+                token: '@x',
+                style: FileStyle(text: Colors.brightCyan),
+              ),
+              InlineToken(
+                token: '@x',
+                style: FileStyle(text: Colors.brightCyan),
+              ),
+            ],
+          ),
+        );
+        controller.text = '@x and @x';
+        await tester.pump();
+
+        expect(tester.terminalState, containsText('@x'));
+        // '@x and @x' -> first '@' at col 0, second '@' at col 7
+        expect(
+          tester.terminalState.getCellAt(0, 0)?.style.color,
+          Colors.brightCyan,
+        );
+        expect(
+          tester.terminalState.getCellAt(7, 0)?.style.color,
+          Colors.brightCyan,
+        );
+      });
+
+      controller.dispose();
+    });
+
+    test('underline token renders underlined cells', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('underline token', (tester) async {
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: controller,
+            focused: false,
+            width: 30,
+            height: 1,
+            tokens: const [
+              InlineToken(
+                token: '@w',
+                style: FileStyle(text: Colors.brightCyan, underline: true),
+              ),
+            ],
+          ),
+        );
+        controller.text = 'see @w here';
+        await tester.pump();
+
+        final start = controller.text.indexOf('@w');
+        expect(tester.terminalState, containsText('@w'));
+        expect(
+          tester.terminalState
+              .getCellAt(start, 0)
+              ?.style
+              .decoration
+              ?.hasUnderline,
+          isTrue,
+        );
+      });
+
+      controller.dispose();
+    });
+
+    test('italic token renders italic cells', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('italic token', (tester) async {
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: controller,
+            focused: false,
+            width: 30,
+            height: 1,
+            tokens: const [
+              InlineToken(
+                token: '@i',
+                style: FileStyle(text: Colors.brightCyan, italic: true),
+              ),
+            ],
+          ),
+        );
+        controller.text = 'see @i here';
+        await tester.pump();
+
+        final start = controller.text.indexOf('@i');
+        expect(tester.terminalState, containsText('@i'));
+        expect(
+          tester.terminalState.getCellAt(start, 0)?.style.fontStyle,
+          FontStyle.italic,
+        );
+      });
+
+      controller.dispose();
+    });
+
+    test('onChanged fires exactly once per controller change', () async {
+      final controller = TextEditingController();
+      var calls = 0;
+      String? lastValue;
+
+      await testNocterm('onChanged forwarded once on key input', (
+        tester,
+      ) async {
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: controller,
+            focused: true,
+            width: 30,
+            height: 1,
+            tokens: const [
+              InlineToken(
+                token: '@x',
+                style: FileStyle(text: Colors.brightCyan),
+              ),
+            ],
+            onChanged: (value) {
+              calls++;
+              lastValue = value;
+            },
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.keyA, character: 'a'),
+        );
+
+        expect(lastValue, 'a');
+        expect(calls, 1);
+      });
+
+      controller.dispose();
+    });
+
+    test(
+      'onChanged fires exactly once for programmatic controller edits',
+      () async {
+        final controller = TextEditingController();
+        var calls = 0;
+        String? lastValue;
+
+        await testNocterm('onChanged forwarded once on programmatic edit', (
+          tester,
+        ) async {
+          await tester.pumpComponent(
+            TokenHighlightTextField(
+              controller: controller,
+              focused: true,
+              width: 30,
+              height: 1,
+              tokens: const [
+                InlineToken(
+                  token: '@x',
+                  style: FileStyle(text: Colors.brightCyan),
+                ),
+              ],
+              onChanged: (value) {
+                calls++;
+                lastValue = value;
+              },
+            ),
+          );
+          controller.text = 'has @x token';
+          await tester.pump();
+
+          expect(lastValue, 'has @x token');
+          expect(calls, 1);
+          expect(tester.terminalState, containsText('has @x token'));
+        });
+
+        controller.dispose();
+      },
+    );
+
+    test('onSubmitted fires on Enter when focused', () async {
+      final controller = TextEditingController();
+      String? submitted;
+
+      await testNocterm('onSubmitted on enter', (tester) async {
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: controller,
+            focused: true,
+            width: 30,
+            height: 1,
+            onSubmitted: (value) => submitted = value,
+          ),
+        );
+        controller.text = 'hello';
+        await tester.pump();
+        await tester.sendEnter();
+
+        expect(submitted, 'hello');
+      });
+
+      controller.dispose();
+    });
+
+    test('obscureText falls back to a plain obscured field', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('obscure text no color', (tester) async {
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: controller,
+            focused: false,
+            width: 30,
+            height: 1,
+            obscureText: true,
+            tokens: [
+              InlineToken(
+                token: '@x',
+                style: FileStyle(text: Colors.brightCyan),
+              ),
+            ],
+          ),
+        );
+        controller.text = '@x';
+        await tester.pump();
+
+        expect(tester.terminalState, isNot(containsText('@x')));
+        expect(
+          tester.terminalState.getCellAt(0, 0)?.style.color,
+          isNot(Colors.brightCyan),
+        );
+      });
+
+      controller.dispose();
+    });
+
+    test('cursor emulation runs when focused', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('cursor emulation', (tester) async {
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: controller,
+            focused: true,
+            width: 30,
+            height: 1,
+            tokens: [
+              InlineToken(
+                token: '@x',
+                style: FileStyle(text: Colors.brightCyan),
+              ),
+            ],
+          ),
+        );
+        controller.text = '@x';
+        controller.selection = const TextSelection.collapsed(offset: 1);
+        await tester.pump();
+
+        expect(tester.terminalState, containsText('@x'));
+        final cursorCell = tester.terminalState.getCellAt(1, 0);
+        expect(cursorCell, isNotNull);
+        expect(cursorCell!.style.backgroundColor, isNotNull);
+      });
+
+      controller.dispose();
+    });
+  });
+
+  group('TokenText', () {
+    test('renders colored inline tokens without editing', () async {
+      await testNocterm('token text colored', (tester) async {
+        await tester.pumpComponent(
+          TokenText(
+            text: 'check @explore and /help',
+            tokens: [
+              InlineToken(
+                token: '@explore',
+                style: FileStyle(text: Colors.brightCyan),
+              ),
+              InlineToken(
+                token: '/help',
+                style: FileStyle(text: Colors.brightMagenta),
+              ),
+            ],
+            width: 30,
+            height: 1,
+          ),
+        );
+
+        expect(tester.terminalState, containsText('@explore'));
+        expect(tester.terminalState, containsText('/help'));
+        // 'check @explore and /help' -> '@' at col 6, '/' at col 19
+        expect(
+          tester.terminalState.getCellAt(6, 0)?.style.color,
+          Colors.brightCyan,
+        );
+        expect(
+          tester.terminalState.getCellAt(19, 0)?.style.color,
+          Colors.brightMagenta,
+        );
+      });
+    });
+  });
 }

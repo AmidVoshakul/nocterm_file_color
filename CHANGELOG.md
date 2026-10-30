@@ -1,3 +1,16 @@
+## 0.0.2
+
+### Features
+
+- `TokenHighlightTextField`: a Nocterm `TextField` wrapper that colors arbitrary inline tokens with per-token styles. It has no file-attachment bookkeeping, suggestion menu, or paste handling; the inner `TextField` and its callbacks (`onChanged`, `onSubmitted`) are forwarded unchanged, with selection highlighting and cursor emulation preserved.
+- `TokenText`: a stateless component that renders a plain string with inline tokens colored, without editing, cursor, or selection.
+- `InlineToken`: immutable public description of a colored inline token (`token` + `FileStyle`) with `==`/`hashCode`.
+- `FileStyle`: new `italic` and `underline` options that map to Nocterm font style and text decoration on inline tokens.
+
+### Refactor
+
+- The inline token span machinery was extracted into a shared internal renderer used by `FileTextField`, `TokenHighlightTextField`, and `TokenText`. `FileTextField`'s public API and behavior are unchanged.
+
 ## 0.0.1
 
 ### Features
