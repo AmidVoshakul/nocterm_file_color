@@ -1,9 +1,12 @@
 A Nocterm `TextField` wrapper that displays attached files and colored tokens
 inline in the input line.
 
-<img src="https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/screenshots/input.png" alt="Agent mentions, slash commands, and file tokens colored inline in the input field" width="720">
+![A composer prompt with colored inline tokens: a pasted file and an agent
+mention shown as colored tags, plus the agent and model line below the
+input](https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/screenshots/input.png)
 
-<img src="https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/screenshots/input-menu.png" alt="Agent mentions, slash commands, and file tokens colored inline in the input field" width="720">
+![The same prompt with the @ mention menu open above it: files, folders, and
+subagents listed with a keyboard-highlighted row](https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/screenshots/input-menu.png)
 
 ## Features
 
