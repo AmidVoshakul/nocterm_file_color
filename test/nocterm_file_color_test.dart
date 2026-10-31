@@ -105,6 +105,17 @@ void main() {
       expect(FileDetector.detectType('.PNG'), FileType.image);
       expect(FileDetector.detectType('DART'), FileType.code);
     });
+
+    test('extensionsFor lists the extensions of a type', () {
+      final code = FileDetector.extensionsFor(FileType.code);
+
+      expect(code, contains('dart'));
+      expect(code, contains('go'));
+      // Unmodifiable: the internal table cannot be mutated by hosts.
+      expect(() => code.add('nope'), throwsUnsupportedError);
+      // Unknown types come back empty rather than null.
+      expect(FileDetector.extensionsFor(FileType.other), isNotNull);
+    });
   });
 
   group('FileInfo', () {
@@ -151,6 +162,44 @@ void main() {
       expect(copy.name, 'renamed.txt');
       expect(copy.path, file.path);
     });
+
+    test('copyWith keeps every field it is not given', () {
+      final file = FileInfo(
+        path: '/tmp/a.txt',
+        name: 'a.txt',
+        extension: 'txt',
+        type: FileType.document,
+        size: 12,
+      );
+      final copy = file.copyWith(size: 99);
+
+      expect(copy.path, file.path);
+      expect(copy.name, file.name);
+      expect(copy.extension, file.extension);
+      expect(copy.type, file.type);
+      expect(copy.size, 99);
+      expect(copy, file.copyWith(size: 99));
+    });
+
+    test('equality and hashCode cover every field', () {
+      final a = FileInfo.fromPath('/tmp/test.txt');
+      final b = FileInfo.fromPath('/tmp/test.txt');
+      final c = a.copyWith(size: 1);
+
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect(a, isNot(c));
+    });
+
+    test('toString reports the path, name and type', () {
+      final file = FileInfo.fromPath('/tmp/main.dart');
+
+      expect(
+        file.toString(),
+        'FileInfo(path: /tmp/main.dart, name: main.dart, '
+        'extension: dart, type: code, size: null)',
+      );
+    });
   });
 
   group('FileConfig', () {
@@ -182,6 +231,74 @@ void main() {
     test('styleFor returns null for unknown extension without default', () {
       final config = const FileConfig();
       expect(config.styleForExtension('unknown'), isNull);
+    });
+
+    test('typeStyles and extensionStyles expose unmodifiable maps', () {
+      final config = FileConfig(
+        typeStyles: {FileType.code: const FileStyle(text: Colors.green)},
+        extensionStyles: {'DART': const FileStyle(text: Colors.blue)},
+      );
+
+      // Extension keys are normalized to lowercase without a dot.
+      expect(config.typeStyles.keys, [FileType.code]);
+      expect(config.extensionStyles.keys, ['dart']);
+      expect(
+        () => config.typeStyles[FileType.document] = const FileStyle(),
+        throwsUnsupportedError,
+      );
+
+      // An empty config still hands out empty maps.
+      expect(const FileConfig().typeStyles, hasLength(0));
+      expect(const FileConfig().extensionStyles, hasLength(0));
+    });
+
+    test('styleFor prefers the extension override over the type default', () {
+      final config = FileConfig(
+        typeStyles: {FileType.code: const FileStyle(text: Colors.green)},
+        extensionStyles: {'dart': const FileStyle(text: Colors.red)},
+      );
+      final dart = FileInfo.fromPath('/tmp/main.dart');
+
+      expect(config.styleFor(dart).text, Colors.red);
+    });
+
+    test('styleFor falls back to a neutral style for an unknown type', () {
+      final config = const FileConfig();
+      final file = FileInfo(
+        path: 'mystery.xyz',
+        name: 'mystery.xyz',
+        extension: 'xyz',
+        type: FileType.other,
+      );
+
+      expect(config.styleFor(file), const FileStyle());
+      expect(config.styleForType(FileType.other), const FileStyle());
+    });
+
+    test('equality ignores map ordering and nulls', () {
+      const red = FileStyle(text: Colors.red);
+      const blue = FileStyle(text: Colors.blue);
+
+      final a = FileConfig(
+        typeStyles: {FileType.code: red, FileType.document: blue},
+        extensionStyles: {'dart': red},
+      );
+      final b = FileConfig(
+        typeStyles: {FileType.document: blue, FileType.code: red},
+        extensionStyles: {'dart': red},
+      );
+      final c = FileConfig(
+        typeStyles: {FileType.code: red},
+        extensionStyles: {'dart': red},
+      );
+
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect(a, isNot(c));
+
+      // Null maps are only equal to null maps.
+      expect(const FileConfig(), const FileConfig());
+      expect(const FileConfig(), isNot(a));
     });
 
     test('FileStyle.toTextStyle converts correctly', () {
@@ -241,6 +358,68 @@ void main() {
       final file = FileInfo.fromPath('/tmp/main.dart');
       final style = const FileStyle(prefix: 'code');
       expect(FileTag.labelFor(file, style), 'main.dart');
+    });
+
+    test('labelFor falls back to the prefix when no index is given', () {
+      final file = FileInfo.fromPath('/tmp/photo.png');
+      final style = const FileStyle(prefix: 'image');
+
+      // An image that already carries a numbered name keeps it.
+      final named = file.copyWith(name: 'image 3');
+      expect(FileTag.labelFor(named, style), 'image 3');
+      // Anything else falls back to the bare prefix.
+      expect(FileTag.labelFor(file, style), 'image');
+    });
+
+    test('label getter matches labelFor', () {
+      final file = FileInfo.fromPath('/tmp/main.dart');
+      final tag = FileTag(file: file, style: const FileStyle());
+
+      expect(tag.label, FileTag.labelFor(file, const FileStyle()));
+    });
+
+    test('renders the token text with the configured colors', () async {
+      await testNocterm('file tag render', (tester) async {
+        final file = FileInfo.fromPath('/tmp/main.dart');
+        await tester.pumpComponent(
+          FileTag(
+            file: file,
+            style: const FileStyle(
+              text: Colors.brightGreen,
+              background: Colors.green,
+            ),
+          ),
+        );
+
+        expect(tester.terminalState, containsText('[main.dart]'));
+        expect(
+          tester.terminalState.getCellAt(1, 0)?.style.color,
+          Colors.brightGreen,
+        );
+        expect(
+          tester.terminalState.getCellAt(1, 0)?.style.backgroundColor,
+          Colors.green,
+        );
+      });
+    });
+
+    test('reports a tap with the represented file', () async {
+      FileInfo? tapped;
+      final file = FileInfo.fromPath('/tmp/main.dart');
+
+      await testNocterm('file tag tap', (tester) async {
+        await tester.pumpComponent(
+          FileTag(
+            file: file,
+            style: const FileStyle(),
+            onTap: (value) => tapped = value,
+          ),
+        );
+        await tester.press(0, 0);
+        await tester.release(0, 0);
+
+        expect(tapped, file);
+      });
     });
   });
 
@@ -523,6 +702,81 @@ void main() {
         controller.dispose();
       },
     );
+
+    test('suggestionMenuPlacement.host renders no in-place menu', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('host menu placement', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+            suggestionMenuPlacement: SuggestionMenuPlacement.host,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+
+        // The widget keeps the menu state but paints nothing itself.
+        expect(tester.terminalState, isNot(containsText('@explore')));
+        expect(
+          tester.terminalState,
+          containsText('@'), // the trigger is typed into the field
+        );
+      });
+
+      controller.dispose();
+    });
+
+    test('suggestions without a style fall back to a kind default', () async {
+      const agent = FileTextFieldSuggestion.agent(name: 'explore');
+      const command = FileTextFieldSuggestion.command(name: 'help');
+      const folder = FileTextFieldSuggestion.folder(name: 'lib/');
+
+      expect(agent.style, FileTextFieldSuggestion.defaultAgentStyle);
+      expect(command.style, FileTextFieldSuggestion.defaultCommandStyle);
+      expect(folder.style, FileTextFieldSuggestion.defaultFolderStyle);
+
+      const custom = FileStyle(text: Colors.red);
+      expect(
+        FileTextFieldSuggestion.agent(name: 'explore', style: custom).style,
+        custom,
+      );
+    });
+
+    test('the default style colors the inserted token', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('default style token', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => const [
+              FileTextFieldSuggestion.agent(name: 'explore'),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.sendEnter();
+
+        expect(controller.text, '[@explore] ');
+        expect(
+          tester.terminalState.getCellAt(1, 0)?.style.color,
+          FileTextFieldSuggestion.defaultAgentStyle.text,
+        );
+      });
+
+      controller.dispose();
+    });
 
     test(
       'renders the attached file token inline with its configured color',
@@ -876,6 +1130,168 @@ void main() {
       controller.dispose();
     });
 
+    test('exposes visibleSuggestions only while the menu is open', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('visible suggestions state', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        expect(key.currentState!.visibleSuggestions, hasLength(0));
+        expect(key.currentState!.selectedSuggestionIndex, -1);
+        expect(key.currentState!.isSuggestionMenuOpen, isFalse);
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+
+        expect(key.currentState!.isSuggestionMenuOpen, isTrue);
+        expect(
+          key.currentState!.visibleSuggestions.map((s) => s.name),
+          containsAll([
+            'example/',
+            'lib/',
+            'explore',
+            'general',
+            'code-reviewer',
+          ]),
+        );
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.space, character: ' '),
+        );
+        await tester.pump();
+
+        expect(key.currentState!.visibleSuggestions, hasLength(0));
+        expect(key.currentState!.selectedSuggestionIndex, -1);
+      });
+
+      controller.dispose();
+    });
+
+    test('selectedSuggestionIndex follows arrow keys', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('selected suggestion index', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => [
+              FileTextFieldSuggestion.agent(
+                name: 'a',
+                style: const FileStyle(),
+              ),
+              FileTextFieldSuggestion.agent(
+                name: 'b',
+                style: const FileStyle(),
+              ),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+
+        expect(key.currentState!.selectedSuggestionIndex, 0);
+        await tester.sendArrowDown();
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 1);
+        await tester.sendArrowUp();
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 0);
+      });
+
+      controller.dispose();
+    });
+
+    test('selectSuggestion inserts the token and closes the menu', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('programmatic suggestion selection', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => [
+              FileTextFieldSuggestion.agent(
+                name: 'explore',
+                style: const FileStyle(),
+              ),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+
+        final menu = key.currentState!.visibleSuggestions;
+        expect(menu, hasLength(1));
+        key.currentState!.selectSuggestion(menu.first);
+        await tester.pump();
+
+        expect(controller.text, '[@explore] ');
+        expect(key.currentState!.visibleSuggestions, hasLength(0));
+        expect(key.currentState!.isSuggestionMenuOpen, isFalse);
+      });
+
+      controller.dispose();
+    });
+
+    test('selectSuggestion ignores a suggestion that is not visible', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('select unknown suggestion', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+
+        key.currentState!.selectSuggestion(
+          FileTextFieldSuggestion.agent(
+            name: 'not-in-the-menu',
+            style: const FileStyle(),
+          ),
+        );
+        await tester.pump();
+
+        expect(controller.text, '@');
+        expect(key.currentState!.isSuggestionMenuOpen, isTrue);
+      });
+
+      controller.dispose();
+    });
+
     test('selects a slash command as a colored inline token', () async {
       final controller = TextEditingController(text: 'Run ');
       final key = GlobalKey<FileTextFieldState>();
@@ -946,6 +1362,429 @@ void main() {
 
       controller.dispose();
     });
+
+    test('pasting a file path attaches it', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('paste attaches path', (tester) async {
+        // testNocterm clears the clipboard on entry, so seed it here.
+        ClipboardManager.copy('/tmp/main.dart');
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+
+        expect(controller.text, '[main.dart] ');
+        expect(key.currentState!.getAttachedFiles(), hasLength(1));
+        expect(
+          key.currentState!.getAttachedFiles().single.path,
+          '/tmp/main.dart',
+        );
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('pasting plain text leaves the attachments alone', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('paste plain text', (tester) async {
+        ClipboardManager.copy('hello world');
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+
+        expect(controller.text, 'hello world');
+        expect(key.currentState!.getAttachedFiles(), hasLength(0));
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('pasting several paths attaches each one', () async {
+      for (final separator in ['\n', ' ']) {
+        final controller = TextEditingController();
+        final key = GlobalKey<FileTextFieldState>();
+
+        await testNocterm('paste multiple paths ($separator)', (tester) async {
+          ClipboardManager.copy('/tmp/a.txt$separator/tmp/b.txt');
+          await tester.pumpComponent(
+            FileTextField(
+              key: key,
+              controller: controller,
+              focused: true,
+              width: 60,
+              height: 2,
+            ),
+          );
+          await tester.sendKeyEvent(
+            const KeyboardEvent(
+              logicalKey: LogicalKey.keyV,
+              modifiers: ModifierKeys(ctrl: true),
+            ),
+          );
+
+          expect(
+            controller.text,
+            '[a.txt] [b.txt] ',
+            reason:
+                'paths separated by ${separator == '\n' ? 'newline' : 'space'}',
+          );
+          expect(key.currentState!.getAttachedFiles(), hasLength(2));
+        });
+
+        controller.dispose();
+      }
+
+      ClipboardManager.clear();
+    });
+
+    test('a pasted path containing a space stays whole', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('path with a space', (tester) async {
+        ClipboardManager.copy('/home/user/My Docs/notes.txt');
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 2,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+
+        expect(controller.text, '[notes.txt] ');
+        expect(
+          key.currentState!.getAttachedFiles().single.path,
+          '/home/user/My Docs/notes.txt',
+        );
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('attachFilePath attaches a file by path string', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('attachFilePath', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: false,
+            width: 40,
+            height: 1,
+          ),
+        );
+        key.currentState!.attachFilePath('/tmp/main.dart');
+
+        expect(controller.text, '[main.dart] ');
+        expect(key.currentState!.getAttachedFiles(), hasLength(1));
+      });
+
+      controller.dispose();
+    });
+
+    test('detachFile removes the token and the attachment', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('detach file', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: false,
+            width: 40,
+            height: 1,
+          ),
+        );
+        final file = FileInfo.fromPath('/tmp/main.dart');
+        key.currentState!.attachFile(file);
+        expect(key.currentState!.getAttachedFiles(), hasLength(1));
+
+        key.currentState!.detachFile(file);
+
+        expect(controller.text, hasLength(0));
+        expect(key.currentState!.getAttachedFiles(), hasLength(0));
+      });
+
+      controller.dispose();
+    });
+
+    test('clearAttachments empties the field and the list', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('clear attachments', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: false,
+            width: 40,
+            height: 2,
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/a.txt'));
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/b.txt'));
+        expect(key.currentState!.getAttachedFiles(), hasLength(2));
+
+        key.currentState!.clearAttachments();
+
+        expect(controller.text, hasLength(0));
+        expect(key.currentState!.getAttachedFiles(), hasLength(0));
+      });
+
+      controller.dispose();
+    });
+
+    test('deleting a token by hand detaches its file', () async {
+      final controller = TextEditingController(text: 'a [main.dart] b');
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('token deleted by hand', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: false,
+            width: 40,
+            height: 1,
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+        expect(key.currentState!.getAttachedFiles(), hasLength(1));
+
+        // The host removes the token text itself: no key event involved.
+        controller.text = 'a  b';
+        await tester.pump();
+
+        expect(key.currentState!.getAttachedFiles(), hasLength(0));
+      });
+
+      controller.dispose();
+    });
+
+    test('onFilesChanged reports additions and removals', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+      final seen = <int>[];
+
+      await testNocterm('files changed callback', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: false,
+            width: 40,
+            height: 1,
+            onFilesChanged: (files) => seen.add(files.length),
+          ),
+        );
+        final file = FileInfo.fromPath('/tmp/main.dart');
+        key.currentState!.attachFile(file);
+        key.currentState!.detachFile(file);
+
+        expect(seen, [1, 0]);
+      });
+
+      controller.dispose();
+    });
+
+    test('tapping a file token reports onFileClick', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+      FileInfo? clicked;
+
+      await testNocterm('token click', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: false,
+            width: 40,
+            height: 1,
+            onFileClick: (file) => clicked = file,
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+        await tester.pump();
+
+        // The token starts at column 0 of the field.
+        await tester.press(0, 0);
+        await tester.release(0, 0);
+
+        expect(clicked?.path, '/tmp/main.dart');
+      });
+
+      controller.dispose();
+    });
+
+    test('backspace at the start of a query removes the trigger', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('backspace removes trigger', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        expect(key.currentState!.isSuggestionMenuOpen, isTrue);
+
+        await tester.sendBackspace();
+
+        expect(controller.text, hasLength(0));
+        expect(key.currentState!.isSuggestionMenuOpen, isFalse);
+      });
+
+      controller.dispose();
+    });
+
+    test('the default menu reports when nothing matches', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('no matches', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            // An empty candidate list keeps the menu open but empty.
+            onSuggestionsRequested: (trigger, query) => const [],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+
+        expect(tester.terminalState, containsText('No matches'));
+      });
+
+      controller.dispose();
+    });
+
+    test(
+      'creates and disposes its own controller when none is given',
+      () async {
+        await testNocterm('owned controller', (tester) async {
+          await tester.pumpComponent(
+            const FileTextField(focused: true, width: 40, height: 1),
+          );
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.keyA, character: 'a'),
+          );
+          expect(tester.terminalState, containsText('a'));
+
+          // Unmounting runs the state's dispose path for the owned controller.
+          await tester.pumpComponent(const SizedBox());
+        });
+      },
+    );
+
+    test('backspace at a token start also removes the leading space', () async {
+      final controller = TextEditingController(text: 'x');
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('backspace eats leading space', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+          ),
+        );
+        // Inserting after 'x' yields 'x [main.dart] '.
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+        expect(controller.text, 'x [main.dart] ');
+
+        await tester.sendBackspace();
+
+        // Backspace at the token also swallows the space that precedes it.
+        expect(controller.text, 'x ');
+        expect(key.currentState!.getAttachedFiles(), hasLength(0));
+      });
+
+      controller.dispose();
+    });
+
+    test('tapping an unfocused field with tokens focuses it', () async {
+      final controller = TextEditingController(text: 'lib 显示');
+      final key = GlobalKey<FileTextFieldState>();
+      final focus = <bool>[];
+
+      await testNocterm('tap focuses', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: false,
+            width: 40,
+            height: 1,
+            onFocusChange: (value) => focus.add(value),
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+        await tester.pump();
+
+        // Wide graphemes shift the columns the hit test has to account for.
+        await tester.press(4, 0);
+        await tester.release(4, 0);
+
+        expect(focus, [true]);
+      });
+
+      controller.dispose();
+    });
   });
 
   group('InlineToken', () {
@@ -978,6 +1817,9 @@ void main() {
       expect(full, equals(same));
       expect(full.hashCode, same.hashCode);
       expect(full, isNot(equals(plain)));
+
+      // Same token with different styles hash differently.
+      expect(full.hashCode, isNot(same.hashCode == plain.hashCode));
       expect(full, isNot(equals(italicOnly)));
       expect(full, isNot(equals(underlineOnly)));
     });

@@ -1,9 +1,23 @@
 ## 0.0.2
 
+### Fixes
+
+- **`FileConfig.hashCode`**: equal configurations could hash differently because `MapEntry` implements `==` but not `hashCode`, so the entries hashed by object identity. Configs are now equal and identically hashed regardless of map insertion order, which matters when a `FileConfig` is used as a map key or stored in a set.
+- **Pasting several paths**: `/tmp/a.txt /tmp/b.txt` was attached as a single broken file named `b.txt`, even though the behavior was documented as space-separated. Lines are now split on spaces when every token ends in a file extension, so a path that legitimately contains a space (`/home/user/My Docs/notes.txt`) still stays whole.
+
+### Features
+
+- **Host-rendered suggestion menu**: `FileTextFieldState` exposes `visibleSuggestions`, `selectedSuggestionIndex` and `isSuggestionMenuOpen`, plus a `selectSuggestion` method, so an application can draw the `@`/`/` menu anywhere in its layout instead of only inside the field. Set `SuggestionMenuPlacement.host` to switch off the in-place menu.
+- **Suggestion menu notifications**: `onSuggestionMenuChanged` fires when the menu opens or closes, its query changes, or the highlighted row moves — arrow-key navigation moves the highlight without editing the text, so `onChanged` alone was not enough to keep an external menu in sync.
+- **Suggestion styles are optional**: `FileTextFieldSuggestion.agent`, `.folder`, and `.command` fall back to a per-kind default token color, so `agent(name: 'explore')` needs no `FileStyle`. Override with `style` where you want; `FileTextFieldSuggestion.defaultAgentStyle` and friends expose the defaults.
 - **Token components**: `TokenHighlightTextField` and `TokenText` color arbitrary strings — `@mentions`, `/commands`, or any token — inline; each `InlineToken` entry colors one occurrence of its token string.
 - **FileStyle**: new `italic` and `underline` options next to `bold`.
 - **slashAnchor**: `FileTextField` accepts `SlashAnchor.startOnly` to open the `/` menu only at the very start of the field text; the default (`SlashAnchor.anywhere`) preserves 0.0.1 behavior.
 - **Shared rendering**: the inline span machinery is now shared between `FileTextField` and the new token components; `FileTextField` behavior is unchanged.
+
+### Examples
+
+- `example/` rewritten as a focused chat-composer demo: an agent/model line inside the prompt, the mention menu floated above it as its own panel, and `Tab` cycling agents. Dropped ~230 lines of text-layout mirroring that existed only to size the field — Nocterm's `TextField` already grows with its content.
 
 ## 0.0.1
 

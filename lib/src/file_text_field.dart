@@ -9,6 +9,20 @@ import 'file_text_field_suggestion.dart';
 import 'inline_token.dart';
 import 'token_spans.dart';
 
+// ---------------------------------------------------------------------------
+// Internal token model
+// ---------------------------------------------------------------------------
+
+/// Where the `@`/`/` suggestion menu is rendered.
+enum SuggestionMenuPlacement {
+  /// Rendered by `FileTextField` directly above the input (default).
+  inline,
+
+  /// Not rendered by `FileTextField` at all: the host draws it wherever its
+  /// layout needs it, from [FileTextFieldState.visibleSuggestions].
+  host,
+}
+
 class _InlineToken {
   const _InlineToken({required this.token, required this.style, this.file});
 
@@ -16,6 +30,10 @@ class _InlineToken {
   final FileStyle style;
   final FileInfo? file;
 }
+
+// ---------------------------------------------------------------------------
+// Widget
+// ---------------------------------------------------------------------------
 
 /// Where the `/` command menu may open inside a [FileTextField].
 enum SlashAnchor {
@@ -38,6 +56,14 @@ enum SlashAnchor {
 /// The host application retrieves the current attachments via
 /// [FileTextFieldState.getAttachedFiles] (typically through a [GlobalKey]) and
 /// receives change notifications through the `onFilesChanged` callback.
+///
+/// The `@`/`/` menu can be styled two ways. Pass [suggestionMenuBuilder] to
+/// restyle the in-place menu, or set [suggestionMenuPlacement] to
+/// [SuggestionMenuPlacement.host] and draw the menu wherever your layout needs
+/// it — for instance as a separate panel above your own prompt container — from
+/// [FileTextFieldState.visibleSuggestions] and
+/// [FileTextFieldState.selectedSuggestionIndex]. Either way the widget keeps
+/// owning trigger detection, filtering, keyboard navigation and token insertion.
 class FileTextField extends StatefulComponent {
   /// Creates a file-aware text field.
   ///
@@ -81,6 +107,8 @@ class FileTextField extends StatefulComponent {
     this.onFilesChanged,
     this.onSuggestionsRequested,
     this.onSuggestionSelected,
+    this.onSuggestionMenuChanged,
+    this.suggestionMenuPlacement = SuggestionMenuPlacement.inline,
     this.suggestionMenuBuilder,
     this.slashAnchor = SlashAnchor.anywhere,
   }) : assert(maxLines == null || maxLines > 0),
@@ -128,6 +156,25 @@ class FileTextField extends StatefulComponent {
   final ValueChanged<List<FileInfo>>? onFilesChanged;
   final FileTextFieldSuggestionProvider? onSuggestionsRequested;
   final ValueChanged<FileTextFieldSuggestion>? onSuggestionSelected;
+
+  /// Called whenever the `@`/`/` menu state changes: the menu opens or closes,
+  /// its query changes, or the highlighted row moves.
+  ///
+  /// Pair it with [FileTextFieldState.visibleSuggestions] and
+  /// [FileTextFieldState.selectedSuggestionIndex] to keep a menu rendered
+  /// outside this widget in sync. Arrow-key navigation moves the highlight
+  /// without editing the text, so [onChanged] alone is not enough.
+  final VoidCallback? onSuggestionMenuChanged;
+
+  /// Where the `@`/`/` menu is rendered.
+  ///
+  /// Defaults to [SuggestionMenuPlacement.inline], painted by the widget above
+  /// the input. Set [SuggestionMenuPlacement.host] to draw it yourself from
+  /// [FileTextFieldState.visibleSuggestions] — for instance as a separate panel
+  /// above your own prompt container — while the widget keeps owning trigger
+  /// detection, filtering, keyboard navigation and token insertion.
+  final SuggestionMenuPlacement suggestionMenuPlacement;
+
   final FileTextFieldSuggestionMenuBuilder? suggestionMenuBuilder;
 
   /// Where the `/` command menu may open. Only affects the `/` trigger; the
@@ -138,6 +185,10 @@ class FileTextField extends StatefulComponent {
   @override
   State<FileTextField> createState() => FileTextFieldState();
 }
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
 
 /// Mutable state for [FileTextField], exposed via [GlobalKey] for [getAttachedFiles].
 class FileTextFieldState extends State<FileTextField> {
@@ -151,6 +202,8 @@ class FileTextFieldState extends State<FileTextField> {
   int _suggestionStartOffset = 0;
   List<FileTextFieldSuggestion> _providedSuggestions = const [];
   int _selectedSuggestionIndex = 0;
+
+  // -- Public API: attachments ----------------------------------------------
 
   /// Returns the current list of attached files.
   ///
@@ -185,7 +238,7 @@ class FileTextFieldState extends State<FileTextField> {
 
   /// Clears all attachments and their tokens.
   void clearAttachments() {
-    setState(() {
+    _setSuggestionState(() {
       _attachedFiles.clear();
       _inlineTokens.clear();
       _imageCounter = 0;
@@ -197,6 +250,48 @@ class FileTextFieldState extends State<FileTextField> {
       _notifyFilesChanged();
     });
   }
+
+  /// Attaches a file by path string (for programmatic use).
+  void attachFilePath(String path) {
+    attachFile(FileInfo.fromPath(path));
+  }
+
+  // -- Public API: suggestion menu ------------------------------------------
+
+  /// The suggestions currently visible for the open `@`/`/` menu.
+  ///
+  /// Empty when no menu is open. Read this together with
+  /// [selectedSuggestionIndex] to render your own menu outside of this widget
+  /// (for example above your own prompt container) instead of passing
+  /// [FileTextField.suggestionMenuBuilder].
+  List<FileTextFieldSuggestion> get visibleSuggestions =>
+      List.unmodifiable(_visibleSuggestions);
+
+  /// Index of the highlighted row in [visibleSuggestions], or -1 when no menu
+  /// is open.
+  ///
+  /// Kept in sync by the widget's own keyboard handling, so a host-rendered
+  /// menu highlights exactly the row the caret keys would accept.
+  int get selectedSuggestionIndex =>
+      _activeTrigger == null ? -1 : _selectedSuggestionIndex;
+
+  /// Whether the `@`/`/` suggestion menu is currently open.
+  bool get isSuggestionMenuOpen =>
+      _activeTrigger != null && _visibleSuggestions.isNotEmpty;
+
+  /// Selects [suggestion] as if it were picked from the menu: removes the
+  /// trigger and query, inserts the suggestion's token (or attaches the file
+  /// for file suggestions) and closes the menu.
+  ///
+  /// No-op when [visibleSuggestions] does not contain [suggestion].
+  void selectSuggestion(FileTextFieldSuggestion suggestion) {
+    if (!_visibleSuggestions.contains(suggestion)) return;
+    _selectSuggestion(suggestion);
+  }
+
+  // -- Token bookkeeping ----------------------------------------------------
+  // Tokens live in the controller text and are re-derived from it, so the
+  // attachment list and the painted spans can never drift apart.
 
   void _insertToken(FileInfo file, {required FileStyle style}) {
     _insertInlineToken(
@@ -285,6 +380,8 @@ class FileTextFieldState extends State<FileTextField> {
     _notifyFilesChanged();
   }
 
+  // -- Lifecycle ------------------------------------------------------------
+
   void _handleControllerChanged() {
     component.onChanged?.call(_controller.text);
     _syncAttachmentsFromText();
@@ -331,6 +428,10 @@ class FileTextFieldState extends State<FileTextField> {
       setState(_refreshSuggestions);
     }
   }
+
+  // -- Input ----------------------------------------------------------------
+  // Paste drops paths in as attachments; keys are intercepted only while a
+  // suggestion menu is open, so ordinary typing stays with Nocterm's TextField.
 
   /// Handles paste events: intercepts file paths and attaches them.
   bool _handlePaste(String pastedText) {
@@ -399,19 +500,30 @@ class FileTextFieldState extends State<FileTextField> {
     }
   }
 
+  // -- Suggestion menu internals --------------------------------------------
+  // Everything here runs behind the public menu API above: detection, query
+  // bookkeeping, filtering, keyboard navigation and token insertion.
+
   void _openSuggestions(String trigger) {
     final text = _controller.text;
     _suggestionStartOffset = _controller.selection.extentOffset.clamp(
       0,
       text.length,
     );
-    setState(() {
+    _setSuggestionState(() {
       _activeTrigger = trigger;
       _suggestionQuery = '';
       _selectedSuggestionIndex = 0;
       _refreshSuggestions();
     });
     _replaceSuggestionInput('');
+  }
+
+  /// Applies a suggestion-menu state change and notifies the host, so a menu
+  /// rendered outside this widget stays in sync.
+  void _setSuggestionState(VoidCallback update) {
+    setState(update);
+    component.onSuggestionMenuChanged?.call();
   }
 
   bool _handleSuggestionKeyEvent(KeyboardEvent event) {
@@ -424,7 +536,7 @@ class FileTextFieldState extends State<FileTextField> {
       final suggestions = _visibleSuggestions;
       if (suggestions.isNotEmpty) {
         final direction = event.logicalKey == LogicalKey.arrowDown ? 1 : -1;
-        setState(() {
+        _setSuggestionState(() {
           _selectedSuggestionIndex =
               (_selectedSuggestionIndex + direction + suggestions.length) %
               suggestions.length;
@@ -448,7 +560,7 @@ class FileTextFieldState extends State<FileTextField> {
       } else {
         final query = _suggestionQuery.characters.skipLast(1).toString();
         _replaceSuggestionInput(query);
-        setState(() {
+        _setSuggestionState(() {
           _suggestionQuery = query;
           _refreshSuggestions();
         });
@@ -463,7 +575,7 @@ class FileTextFieldState extends State<FileTextField> {
       }
       final query = '$_suggestionQuery${event.character!}';
       _replaceSuggestionInput(query);
-      setState(() {
+      _setSuggestionState(() {
         _suggestionQuery = query;
         _refreshSuggestions();
       });
@@ -478,7 +590,7 @@ class FileTextFieldState extends State<FileTextField> {
   }
 
   void _closeSuggestions() {
-    setState(() {
+    _setSuggestionState(() {
       _activeTrigger = null;
       _suggestionQuery = '';
       _providedSuggestions = const [];
@@ -553,6 +665,10 @@ class FileTextFieldState extends State<FileTextField> {
     component.onSuggestionSelected?.call(suggestion);
   }
 
+  // -- Attachment editing ---------------------------------------------------
+  // Backspace/Delete remove a touched token as one unit, and pasted paths are
+  // recognized here before the text ever reaches the controller.
+
   bool _removeAttachmentAtSelection({required bool backwards}) {
     final text = _controller.text;
     final selection = _controller.selection;
@@ -586,18 +702,30 @@ class FileTextFieldState extends State<FileTextField> {
     return false;
   }
 
-  /// Extracts file paths from pasted text (one per line or space-separated).
+  /// Extracts file paths from pasted text: one per line, or several on a line
+  /// separated by spaces.
+  ///
+  /// A line is only split on spaces when *every* token ends in a file
+  /// extension, so a path that legitimately contains a space
+  /// (`/home/user/My Docs/a.txt`) stays whole instead of being torn into
+  /// fragments.
   List<String> _extractPaths(String text) {
-    final lines = text.split('\n');
     final paths = <String>[];
-    for (final line in lines) {
+    for (final line in text.split('\n')) {
       final trimmed = line.trim();
-      if (trimmed.isNotEmpty && _looksLikePath(trimmed)) {
+      if (trimmed.isEmpty) continue;
+
+      final tokens = trimmed.split(RegExp(r'\s+'));
+      if (tokens.length > 1 && tokens.every((token) => _hasExtension(token))) {
+        paths.addAll(tokens);
+      } else if (_looksLikePath(trimmed)) {
         paths.add(trimmed);
       }
     }
     return paths;
   }
+
+  bool _hasExtension(String path) => RegExp(r'\.[a-zA-Z0-9]+$').hasMatch(path);
 
   bool _looksLikePath(String s) {
     // Heuristic: contains path separator or looks like a file with extension
@@ -606,10 +734,9 @@ class FileTextFieldState extends State<FileTextField> {
         RegExp(r'\.[a-zA-Z0-9]+$').hasMatch(s);
   }
 
-  /// Attaches a file by path string (for programmatic use).
-  void attachFilePath(String path) {
-    attachFile(FileInfo.fromPath(path));
-  }
+  // -- Rendering ------------------------------------------------------------
+  // The field paints through Nocterm's public RichText so tokens can carry
+  // their own colors; the caret and selection are emulated on that overlay.
 
   @override
   Component build(BuildContext context) {
@@ -710,6 +837,9 @@ class FileTextFieldState extends State<FileTextField> {
         _selectedSuggestionIndex,
         _selectSuggestion,
       );
+    }
+    if (component.suggestionMenuPlacement == SuggestionMenuPlacement.host) {
+      return const SizedBox.shrink();
     }
 
     return _buildDefaultSuggestionMenu(suggestions);

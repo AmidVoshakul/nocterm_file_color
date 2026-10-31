@@ -216,10 +216,19 @@ class FileConfig {
 
   @override
   int get hashCode => Object.hash(
-    Object.hashAllUnordered(_typeStyles?.entries ?? const []),
-    Object.hashAllUnordered(_extensionStyles?.entries ?? const []),
+    Object.hashAllUnordered(_styledEntries(_typeStyles)),
+    Object.hashAllUnordered(_styledEntries(_extensionStyles)),
   );
 }
+
+/// Order-independent content hashes for a config map.
+///
+/// `MapEntry` implements `==` but not `hashCode`, so hashing the entries
+/// directly would hash object identity and give equal configs different
+/// hashes.
+Iterable<Object> _styledEntries<K, V>(Map<K, V>? map) =>
+    map?.entries.map((entry) => Object.hash(entry.key, entry.value)) ??
+    const [];
 
 bool _mapsEqual<K, V>(Map<K, V>? a, Map<K, V>? b) {
   if (a == null && b == null) return true;

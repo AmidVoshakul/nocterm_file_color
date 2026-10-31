@@ -23,7 +23,30 @@ class FileTextFieldSuggestion {
     this.file,
   });
 
+  /// Fallback token colors for suggestions that pass no [style].
+  ///
+  /// These mirror the palette `FileConfig.defaultConfig()` uses for file types,
+  /// so a suggestion token and an attachment token look alike. Override per
+  /// suggestion with the `style` argument.
+  static const FileStyle defaultFolderStyle = FileStyle(
+    text: Colors.brightYellow,
+    background: Colors.yellow,
+  );
+
+  static const FileStyle defaultAgentStyle = FileStyle(
+    text: Colors.brightCyan,
+    background: Colors.cyan,
+  );
+
+  static const FileStyle defaultCommandStyle = FileStyle(
+    text: Colors.brightMagenta,
+    background: Colors.magenta,
+  );
+
   /// Creates a file suggestion. Selecting it attaches [file].
+  ///
+  /// [style] colors the inserted token; pass `config.styleFor(file)` from a
+  /// `FileConfig` to reuse your application's file palette.
   factory FileTextFieldSuggestion.file(
     FileInfo file, {
     required FileStyle style,
@@ -39,27 +62,36 @@ class FileTextFieldSuggestion {
   }
 
   /// Creates a folder suggestion. [name] should include its trailing `/`.
+  ///
+  /// [style] defaults to [defaultFolderStyle].
   const FileTextFieldSuggestion.folder({
     required this.name,
-    required this.style,
+    FileStyle? style,
     this.searchText,
   }) : kind = FileTextFieldSuggestionKind.folder,
+       style = style ?? defaultFolderStyle,
        file = null;
 
   /// Creates an agent suggestion. [name] omits the leading `@`.
+  ///
+  /// [style] defaults to [defaultAgentStyle].
   const FileTextFieldSuggestion.agent({
     required this.name,
-    required this.style,
+    FileStyle? style,
     this.searchText,
   }) : kind = FileTextFieldSuggestionKind.agent,
+       style = style ?? defaultAgentStyle,
        file = null;
 
   /// Creates a slash-command suggestion. [name] omits the leading `/`.
+  ///
+  /// [style] defaults to [defaultCommandStyle].
   const FileTextFieldSuggestion.command({
     required this.name,
-    required this.style,
+    FileStyle? style,
     this.searchText,
   }) : kind = FileTextFieldSuggestionKind.command,
+       style = style ?? defaultCommandStyle,
        file = null;
 
   /// Category of the suggestion.
@@ -68,7 +100,10 @@ class FileTextFieldSuggestion {
   /// Name used for display and to build the inserted token.
   final String name;
 
-  /// Style used for the inserted inline token. The host application owns menu styling.
+  /// Style used for the inserted inline token.
+  ///
+  /// The host application owns menu styling; this style colors the token the
+  /// package inserts, not the menu row. Defaults per kind, overridable.
   final FileStyle style;
 
   /// Optional additional searchable text. Defaults to [name].

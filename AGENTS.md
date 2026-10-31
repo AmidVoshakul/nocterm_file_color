@@ -27,6 +27,11 @@ The approach is a **widget wrapper `FileTextField`** (NOT a fork of Nocterm). Wr
 - `onFilesChanged(List<FileInfo>)` — notifications about changes (adding/deleting/replacing).
 - `onFileClick` - by default opens the file location in the OS (cross-platform), overridden.
 
+### Suggestion menu placement
+- `suggestionMenuBuilder` restyles the `@`/`/` menu inside `FileTextField`, above the input.
+- To draw the menu elsewhere (e.g. a separate panel above your own prompt container), set `suggestionMenuPlacement: SuggestionMenuPlacement.host` and read `FileTextFieldState.visibleSuggestions` / `.selectedSuggestionIndex` via a `GlobalKey`; select rows with `.selectSuggestion(...)`.
+- Keep an external menu in sync with `onSuggestionMenuChanged` (fires on open/close, query change and highlight move — arrow keys change the highlight without editing text, so `onChanged` is not enough).
+
 ### Target file structure
 ```
 lib/

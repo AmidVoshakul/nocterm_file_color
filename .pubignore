@@ -5,3 +5,5 @@ AGENTS.md
 .codegraph/
 analysis_options.yaml
 test/
+build/
+coverage/

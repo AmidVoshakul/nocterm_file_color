@@ -3,6 +3,8 @@ inline in the input line.
 
 <img src="https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/screenshots/input.png" alt="Agent mentions, slash commands, and file tokens colored inline in the input field" width="720">
 
+<img src="https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/screenshots/input-menu.png" alt="Agent mentions, slash commands, and file tokens colored inline in the input field" width="720">
+
 ## Features
 
 - **Inline file attachments** – paste a path or attach programmatically;
@@ -41,14 +43,9 @@ import 'package:nocterm_file_color/nocterm_file_color.dart';
 final input = FileTextField(
   onSuggestionsRequested: (trigger, query) {
     if (trigger == '/') {
-      return [
-        FileTextFieldSuggestion.command(
-          name: 'help',
-          style: const FileStyle(bold: true),
-        ),
-      ];
+      return [const FileTextFieldSuggestion.command(name: 'help')];
     }
-    return [FileTextFieldSuggestion.agent(name: 'explore')];
+    return const [FileTextFieldSuggestion.agent(name: 'explore')];
   },
   onSuggestionSelected: (suggestion) {
     // The host decides what a command or agent should do.
@@ -57,6 +54,24 @@ final input = FileTextField(
     // Attached files, ready to send to your model.
   },
 );
+```
+
+Agents, folders, and commands need no `style`: each kind falls back to a
+default token color, and `FileStyle` overrides it where you want:
+
+```dart
+FileTextFieldSuggestion.agent(name: 'explore')                     // default cyan
+FileTextFieldSuggestion.agent(
+  name: 'explore',
+  style: FileStyle(text: Colors.brightCyan, openingDelimiter: ''),
+)
+```
+
+Files take their colors from a `FileConfig`, exactly like attachments:
+
+```dart
+final config = FileConfig.defaultConfig();
+FileTextFieldSuggestion.file(file, style: config.styleFor(file));
 ```
 
 ## Coloring tokens
@@ -107,6 +122,59 @@ FileStyle(openingDelimiter: '', closingDelimiter: '')    // →  lib/main.dart
   a `suggestionMenuBuilder` provides a custom menu component.
 - `onSuggestionSelected` reports the selection to the host; the package never
   executes agents or commands.
+
+### Rendering the menu yourself
+
+By default `FileTextField` paints a neutral menu directly above the input.
+Replace it in place with `suggestionMenuBuilder`, or drop it entirely with
+`SuggestionMenuPlacement.host` and draw it wherever your layout needs — for
+instance as a separate panel above your own prompt container.
+
+```dart
+class _MyComposerState extends State<MyComposer> {
+  final fieldKey = GlobalKey<FileTextFieldState>();
+  final controller = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    final menu = fieldKey.currentState?.visibleSuggestions ?? const [];
+    final selected = fieldKey.currentState?.selectedSuggestionIndex ?? -1;
+
+    return Column(
+      children: [
+        // Only rendered while the menu is open.
+        if (menu.isNotEmpty)
+          MyMenu(
+            rows: menu,
+            highlighted: selected,
+            onPick: (row) => fieldKey.currentState!.selectSuggestion(row),
+          ),
+        FileTextField(
+          key: fieldKey,
+          controller: controller,
+          focused: true,
+          onSuggestionsRequested: (trigger, query) => myCandidates(trigger),
+          // The field stops painting its own menu; trigger detection,
+          // filtering and keyboard navigation stay inside it either way.
+          suggestionMenuPlacement: SuggestionMenuPlacement.host,
+          // Rebuilds this widget so the panel tracks the menu.
+          onSuggestionMenuChanged: () => setState(() {}),
+        ),
+      ],
+    );
+  }
+}
+```
+
+- `visibleSuggestions` — the candidates for the open menu, empty when closed.
+- `selectedSuggestionIndex` — the highlighted row, `-1` when closed.
+- `selectSuggestion(candidate)` — pick a row programmatically, e.g. on click.
+- `onSuggestionMenuChanged` — fires when the menu opens/closes, its query
+  changes, or the highlight moves. Arrow keys move the highlight without
+  editing text, so `onChanged` alone is not enough.
+
+Trigger detection, filtering, keyboard navigation and token insertion stay
+inside the package either way. See `example/` for a full implementation.
 
 ## Default file colors
 
