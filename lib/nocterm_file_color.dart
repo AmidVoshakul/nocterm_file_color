@@ -4,6 +4,7 @@ export 'src/file_info.dart';
 export 'src/file_opener.dart';
 export 'src/file_tag.dart';
 export 'src/file_text_field.dart';
+export 'src/suggestion_menu_style.dart';
 export 'src/file_text_field_suggestion.dart';
 export 'src/inline_token.dart';
 export 'src/token_highlight_text_field.dart';

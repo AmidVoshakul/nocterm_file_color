@@ -8,6 +8,7 @@ import 'file_info.dart';
 import 'file_opener.dart';
 import 'file_tag.dart';
 import 'file_text_field_suggestion.dart';
+import 'suggestion_menu_style.dart';
 import 'inline_token.dart';
 import 'token_spans.dart';
 
@@ -113,6 +114,7 @@ class FileTextField extends StatefulComponent {
     this.suggestionMenuPlacement = SuggestionMenuPlacement.inline,
     this.suggestionMenuBuilder,
     this.slashAnchor = SlashAnchor.anywhere,
+    this.suggestionMenuStyle = const SuggestionMenuStyle(),
     this.suggestionPageSize = 8,
     this.suggestionCyclicScroll = true,
     this.suggestionScrollThreshold = 1,
@@ -186,6 +188,9 @@ class FileTextField extends StatefulComponent {
   /// `@` mention trigger always works at word boundaries. Defaults to
   /// [SlashAnchor.anywhere], preserving 0.0.1 behavior.
   final SlashAnchor slashAnchor;
+
+  /// Visual style for the built-in suggestion menu.
+  final SuggestionMenuStyle suggestionMenuStyle;
 
   /// Maximum number of suggestion rows painted at once in the built-in menu.
   final int suggestionPageSize;
@@ -334,6 +339,9 @@ class FileTextFieldState extends State<FileTextField> {
   /// Configured page size for the suggestion menu (see
   /// [FileTextField.suggestionPageSize]).
   int get suggestionPageSize => component.suggestionPageSize;
+
+  /// Visual style for the built-in suggestion menu.
+  SuggestionMenuStyle get suggestionMenuStyle => component.suggestionMenuStyle;
 
   /// Moves the highlighted suggestion by [delta] rows, applying the configured
   /// cyclic/linear policy and scroll threshold. Intended for host-rendered
@@ -1062,6 +1070,7 @@ class FileTextFieldState extends State<FileTextField> {
   Component _buildDefaultSuggestionMenu(
     List<FileTextFieldSuggestion> suggestions,
   ) {
+    final style = component.suggestionMenuStyle;
     final pageSize = suggestions.isEmpty
         ? 1
         : _effectiveSuggestionPageSize(suggestions.length);
@@ -1074,6 +1083,11 @@ class FileTextFieldState extends State<FileTextField> {
         ? const <FileTextFieldSuggestion>[]
         : suggestions.sublist(offset, windowEnd);
 
+    final marker = style.highlightMarker;
+    final markerPrefix = marker.isEmpty ? '' : '$marker ';
+    final markerWidth = markerPrefix.length;
+    final unselectedPrefix = marker.isEmpty ? '' : ' ' * markerWidth;
+
     return MouseRegion(
       onHover: (event) {
         if (event.button == MouseButton.wheelUp) {
@@ -1084,25 +1098,39 @@ class FileTextFieldState extends State<FileTextField> {
       },
       child: Container(
         width: component.width,
-        padding: const EdgeInsets.symmetric(vertical: 1),
-        decoration: BoxDecoration(border: BoxBorder.all(color: Colors.gray)),
+        padding: style.padding,
+        decoration: BoxDecoration(
+          color: style.backgroundColor,
+          border: style.border,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: suggestions.isEmpty
-              ? [const Text('No matches', style: TextStyle(color: Colors.gray))]
+              ? [Text('No matches', style: TextStyle(color: Colors.gray))]
               : [
                   for (var i = 0; i < visible.length; i++)
                     GestureDetector(
                       onTap: () => _selectSuggestion(visible[i]),
-                      child: RichText(
-                        text: TextSpan(
-                          children: _highlightedSuggestionRow(
-                            prefix: offset + i == _selectedSuggestionIndex
-                                ? '> '
-                                : '  ',
-                            label: visible[i].displayLabel,
-                            query: _suggestionQuery,
-                            selected: offset + i == _selectedSuggestionIndex,
+                      child: Container(
+                        color: offset + i == _selectedSuggestionIndex
+                            ? style.selectedBackgroundColor
+                            : null,
+                        padding: const EdgeInsets.symmetric(horizontal: 1),
+                        child: RichText(
+                          text: TextSpan(
+                            children: _highlightedSuggestionRow(
+                              prefix: offset + i == _selectedSuggestionIndex
+                                  ? markerPrefix
+                                  : unselectedPrefix,
+                              label: visible[i].displayLabel,
+                              query: _suggestionQuery,
+                              selected: offset + i == _selectedSuggestionIndex,
+                              selectedTextColor: style.selectedTextColor,
+                              itemTextColor: style.itemTextColor,
+                              highlightMarkerColor:
+                                  style.highlightMarkerColor ??
+                                  style.selectedTextColor,
+                            ),
                           ),
                         ),
                       ),
@@ -1118,14 +1146,20 @@ class FileTextFieldState extends State<FileTextField> {
     required String label,
     required String query,
     required bool selected,
+    required Color selectedTextColor,
+    required Color itemTextColor,
+    required Color highlightMarkerColor,
   }) {
-    final baseColor = selected ? Colors.black : Colors.white;
+    final baseColor = selected ? selectedTextColor : itemTextColor;
     final baseStyle = TextStyle(color: baseColor);
     final highlightStyle = TextStyle(
       color: baseColor,
       fontWeight: FontWeight.bold,
     );
-    final spans = <TextSpan>[TextSpan(text: prefix, style: baseStyle)];
+    final prefixStyle = TextStyle(
+      color: selected ? highlightMarkerColor : itemTextColor,
+    );
+    final spans = <TextSpan>[TextSpan(text: prefix, style: prefixStyle)];
     if (query.isEmpty) {
       spans.add(TextSpan(text: label, style: baseStyle));
       return spans;

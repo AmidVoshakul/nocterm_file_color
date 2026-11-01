@@ -20,6 +20,7 @@ subagents listed with a keyboard-highlighted row](https://raw.githubusercontent.
   candidates (`FileTextFieldSuggestion.file`, `.folder`, `.agent`, `.command`);
   the field filters, selects, and inserts them.
 - **Configurable suggestion menu** – `suggestionPageSize`, `suggestionCyclicScroll`, `suggestionScrollThreshold`, PgUp/PgDn/Home/End, mouse wheel, and matched substring highlighting.
+- **Suggestion menu styling** – `SuggestionMenuStyle` configures background, border (any sides or none), selected/item colors, padding, and the highlight marker (default none).
 - **Multiline input** – Ctrl+Enter / Shift+Enter / Alt+Enter / Ctrl+J insert newlines in multiline fields, even with the suggestion menu open.
 - **Optional `/` anchor** – `slashAnchor: SlashAnchor.startOnly` restricts the
   slash menu to the very start of the field; the default opens it at any word

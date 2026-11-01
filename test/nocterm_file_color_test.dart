@@ -1222,7 +1222,7 @@ void main() {
             width: 40,
             height: 1,
             onSuggestionsRequested: _mockSuggestions,
-            onSuggestionSelected: (suggestion) {
+            onSuggestionSelected: (FileTextFieldSuggestion suggestion) {
               selectedSuggestion = suggestion;
             },
           ),
@@ -2258,6 +2258,77 @@ void main() {
 
       controller.dispose();
     });
+
+    test('default suggestion menu has no highlight marker', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('no marker', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => [
+              FileTextFieldSuggestion.command(
+                name: 'help',
+                style: const FileStyle(),
+              ),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+        await tester.pump();
+
+        expect(tester.terminalState, containsText('help'));
+        expect(tester.terminalState, isNot(containsText('> help')));
+      });
+
+      controller.dispose();
+    });
+
+    test(
+      'suggestion menu style applies marker, colors and no border',
+      () async {
+        final controller = TextEditingController();
+
+        await testNocterm('styled menu', (tester) async {
+          await tester.pumpComponent(
+            FileTextField(
+              controller: controller,
+              focused: true,
+              width: 40,
+              height: 1,
+              suggestionMenuStyle: const SuggestionMenuStyle(
+                border: null,
+                highlightMarker: '>',
+                selectedBackgroundColor: Colors.magenta,
+                selectedTextColor: Colors.white,
+                itemTextColor: Colors.green,
+                padding: EdgeInsets.zero,
+              ),
+              onSuggestionsRequested: (trigger, query) => [
+                FileTextFieldSuggestion.command(
+                  name: 'help',
+                  style: const FileStyle(),
+                ),
+              ],
+            ),
+          );
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+          );
+          await tester.pump();
+
+          // marker present
+          expect(tester.terminalState, containsText('> /help'));
+        });
+
+        controller.dispose();
+      },
+    );
 
     test(
       'creates and disposes its own controller when none is given',

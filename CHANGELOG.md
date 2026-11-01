@@ -1,8 +1,9 @@
-## Unreleased
+## 0.0.3
 
 ### Features
 
 - **Multiline breaks**: Ctrl+Enter / Shift+Enter / Alt+Enter / Ctrl+J insert a newline in multiline fields instead of submitting, including while the suggestion menu is open.
+- **Suggestion menu styling**: new `SuggestionMenuStyle` configures background, border (any sides or none), selected/item/description colors, padding, and the highlight marker (default none), for the built-in menu.
 - **Suggestion menu pagination and navigation**: configurable `suggestionPageSize` (default 8), `suggestionCyclicScroll` (default true), and `suggestionScrollThreshold` (default 1). Adds PgUp/PgDn/Home/End, mouse wheel scrolling, matched substring highlighting, and public API `suggestionScrollOffset`, `suggestionPageSize`, `moveSuggestionHighlight`.
 
 ### Fixes

@@ -119,7 +119,12 @@ class _ComposerDemoState extends State<ComposerDemo> {
     final suggestions = <FileTextFieldSuggestion>[];
 
     if (trigger == '/') {
-      const commandStyle = FileStyle(background: Colors.magenta, bold: true);
+      const commandStyle = FileStyle(
+        background: Colors.magenta,
+        bold: true,
+        openingDelimiter: '',
+        closingDelimiter: '',
+      );
       suggestions.addAll(const [
         FileTextFieldSuggestion.command(name: 'init', style: commandStyle),
         FileTextFieldSuggestion.command(name: 'review', style: commandStyle),
