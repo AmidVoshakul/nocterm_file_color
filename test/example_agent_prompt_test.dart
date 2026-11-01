@@ -103,5 +103,55 @@ void main() {
         }
       });
     });
+
+    test('Escape closes the mention menu before it exits', () async {
+      var quitCount = 0;
+      await testNocterm('escape closes menu', (tester) async {
+        await tester.pumpComponent(
+          example.ComposerDemo(onQuit: () => quitCount++),
+        );
+        await tester.pump();
+        await tester.enterText('@');
+        await tester.pump();
+        expect(tester.terminalState, containsText('@explore'));
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.escape),
+        );
+        await tester.pump();
+
+        // The menu is gone but the typed trigger survives, so Escape was
+        // consumed by the field rather than quitting the app.
+        expect(tester.terminalState, isNot(containsText('@explore')));
+        expect(tester.terminalState, containsText('@'));
+        expect(quitCount, 0, reason: 'menu was open, so Escape only closed it');
+
+        // A second Escape, with no menu open, is the one that quits.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.escape),
+        );
+        await tester.pump();
+        expect(quitCount, 1);
+      });
+    });
+
+    test('Ctrl+C quits via onQuit', () async {
+      var quitCount = 0;
+      await testNocterm('ctrl+c quits', (tester) async {
+        await tester.pumpComponent(
+          example.ComposerDemo(onQuit: () => quitCount++),
+        );
+        await tester.pump();
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyC,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+        expect(quitCount, 1);
+      });
+    });
   });
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:nocterm/nocterm.dart';
 
 import 'inline_token.dart';
@@ -108,6 +110,10 @@ class TokenHighlightTextField extends StatefulComponent {
 class _TokenHighlightTextFieldState extends State<TokenHighlightTextField> {
   late TextEditingController _controller;
   bool _controllerIsInternal = false;
+  Timer? _cursorBlinkTimer;
+  bool _cursorBlinkActive = false;
+  Duration? _cursorBlinkRate;
+  bool _cursorVisible = true;
 
   @override
   void initState() {
@@ -121,10 +127,12 @@ class _TokenHighlightTextFieldState extends State<TokenHighlightTextField> {
     }
 
     _controller.addListener(_handleControllerChanged);
+    _syncCursorBlink();
   }
 
   @override
   void dispose() {
+    _cursorBlinkTimer?.cancel();
     _controller.removeListener(_handleControllerChanged);
     if (_controllerIsInternal) {
       _controller.dispose();
@@ -141,14 +149,41 @@ class _TokenHighlightTextFieldState extends State<TokenHighlightTextField> {
       _controllerIsInternal = component.controller == null;
       _controller = component.controller ?? TextEditingController();
       _controller.addListener(_handleControllerChanged);
+      _syncCursorBlink();
     }
+    _syncCursorBlink();
   }
 
   void _handleControllerChanged() {
     // Do not re-emit component.onChanged here: the inner TextField already
     // invokes it exactly once per controller change. This listener only
     // repaints the transparent overlay.
+    _syncCursorBlink();
     setState(() {});
+  }
+
+  void _syncCursorBlink() {
+    final showInlineTokens =
+        component.tokens.isNotEmpty && !component.obscureText;
+    final want = showInlineTokens && component.focused && component.showCursor;
+    if (want == _cursorBlinkActive &&
+        component.cursorBlinkRate == _cursorBlinkRate) {
+      return;
+    }
+    _cursorBlinkActive = want;
+    _cursorBlinkRate = component.cursorBlinkRate;
+    _cursorBlinkTimer?.cancel();
+    _cursorBlinkTimer = null;
+    if (want) {
+      _cursorVisible = true;
+      if (component.cursorBlinkRate != null) {
+        _cursorBlinkTimer = Timer.periodic(component.cursorBlinkRate!, (_) {
+          if (mounted) setState(() => _cursorVisible = !_cursorVisible);
+        });
+      }
+    } else {
+      _cursorVisible = false;
+    }
   }
 
   @override
@@ -195,7 +230,8 @@ class _TokenHighlightTextFieldState extends State<TokenHighlightTextField> {
       final baseStyle = component.style ?? const TextStyle();
       final selectionColor =
           component.selectionColor ?? cursorColor.withOpacity(0.4);
-      final cursorOffset = component.focused && component.showCursor
+      final cursorOffset =
+          component.focused && component.showCursor && _cursorVisible
           ? selection.extentOffset.clamp(0, text.length)
           : null;
 

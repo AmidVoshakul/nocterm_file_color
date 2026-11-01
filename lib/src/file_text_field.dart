@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:characters/characters.dart';
 import 'package:nocterm/nocterm.dart';
 
@@ -196,7 +198,10 @@ class FileTextFieldState extends State<FileTextField> {
   bool _controllerIsInternal = false;
   final List<FileInfo> _attachedFiles = [];
   final List<_InlineToken> _inlineTokens = [];
-  int _imageCounter = 0;
+  Timer? _cursorBlinkTimer;
+  bool _cursorBlinkActive = false;
+  Duration? _cursorBlinkRate;
+  bool _cursorVisible = true;
   String? _activeTrigger;
   String _suggestionQuery = '';
   int _suggestionStartOffset = 0;
@@ -216,15 +221,38 @@ class FileTextFieldState extends State<FileTextField> {
     setState(() {
       final fileStyle = style ?? _styleFor(file);
       if (file.type == FileType.image) {
-        _imageCounter++;
         file = file.copyWith(
-          name: '${fileStyle.prefix ?? 'image'} $_imageCounter',
+          name: '${fileStyle.prefix ?? 'image'} ${_nextImageIndex(fileStyle)}',
         );
       }
       _attachedFiles.add(file);
       _insertToken(file, style: fileStyle);
       _notifyFilesChanged();
     });
+  }
+
+  /// The lowest image label number not yet taken by an attached image.
+  ///
+  /// Numbers come from what is actually attached rather than from a counter
+  /// that only ever grew: deleting a token frees its number, so re-adding an
+  /// image reuses `[image 2]` instead of skipping ahead to `[image 3]`. The
+  /// label is the name `FileTag.labelFor` already falls back to, so no extra
+  /// field is needed to carry the number.
+  int _nextImageIndex(FileStyle fileStyle) {
+    final prefix = fileStyle.prefix ?? 'image';
+    final taken = _attachedFiles
+        .where((attached) => attached.type == FileType.image)
+        .map((attached) => attached.name)
+        .where((name) => name.startsWith('$prefix '))
+        .map((name) => int.tryParse(name.substring(prefix.length + 1)))
+        .whereType<int>()
+        .toSet();
+
+    var index = 1;
+    while (taken.contains(index)) {
+      index++;
+    }
+    return index;
   }
 
   /// Removes a file from the attachment list and its token from the text.
@@ -241,7 +269,6 @@ class FileTextFieldState extends State<FileTextField> {
     _setSuggestionState(() {
       _attachedFiles.clear();
       _inlineTokens.clear();
-      _imageCounter = 0;
       _activeTrigger = null;
       _suggestionQuery = '';
       _providedSuggestions = const [];
@@ -363,6 +390,29 @@ class FileTextFieldState extends State<FileTextField> {
     component.onFilesChanged?.call(List.unmodifiable(_attachedFiles));
   }
 
+  void _syncCursorBlink() {
+    final showInlineTags = _inlineTokens.isNotEmpty && !component.obscureText;
+    final want = showInlineTags && component.focused && component.showCursor;
+    if (want == _cursorBlinkActive &&
+        component.cursorBlinkRate == _cursorBlinkRate) {
+      return;
+    }
+    _cursorBlinkActive = want;
+    _cursorBlinkRate = component.cursorBlinkRate;
+    _cursorBlinkTimer?.cancel();
+    _cursorBlinkTimer = null;
+    if (want) {
+      _cursorVisible = true;
+      if (component.cursorBlinkRate != null) {
+        _cursorBlinkTimer = Timer.periodic(component.cursorBlinkRate!, (_) {
+          if (mounted) setState(() => _cursorVisible = !_cursorVisible);
+        });
+      }
+    } else {
+      _cursorVisible = false;
+    }
+  }
+
   void _syncAttachmentsFromText() {
     final text = _controller.text;
     _inlineTokens.removeWhere(
@@ -385,6 +435,7 @@ class FileTextFieldState extends State<FileTextField> {
   void _handleControllerChanged() {
     component.onChanged?.call(_controller.text);
     _syncAttachmentsFromText();
+    _syncCursorBlink();
     setState(() {});
   }
 
@@ -400,10 +451,12 @@ class FileTextFieldState extends State<FileTextField> {
     }
 
     _controller.addListener(_handleControllerChanged);
+    _syncCursorBlink();
   }
 
   @override
   void dispose() {
+    _cursorBlinkTimer?.cancel();
     _controller.removeListener(_handleControllerChanged);
     if (_controllerIsInternal) {
       _controller.dispose();
@@ -421,12 +474,15 @@ class FileTextFieldState extends State<FileTextField> {
       _controller = component.controller ?? TextEditingController();
       _controller.addListener(_handleControllerChanged);
       _syncAttachmentsFromText();
+      _syncCursorBlink();
     }
     if (component.onSuggestionsRequested !=
             oldComponent.onSuggestionsRequested &&
         _activeTrigger != null) {
       setState(_refreshSuggestions);
+      _syncCursorBlink();
     }
+    _syncCursorBlink();
   }
 
   // -- Input ----------------------------------------------------------------
@@ -531,6 +587,17 @@ class FileTextFieldState extends State<FileTextField> {
       _closeSuggestions();
       return true;
     }
+    // A modified Enter or Ctrl+J is a line-break intent, not a menu pick:
+    // close the menu and pass the event on, so Nocterm's TextField inserts
+    // the newline with its own selection/limit handling.
+    final isModifierEnter =
+        event.logicalKey == LogicalKey.enter &&
+        (event.isControlPressed || event.isShiftPressed || event.isAltPressed);
+    if ((isModifierEnter || event.matches(LogicalKey.keyJ, ctrl: true)) &&
+        component.maxLines != 1) {
+      _closeSuggestions();
+      return false;
+    }
     if (event.logicalKey == LogicalKey.arrowUp ||
         event.logicalKey == LogicalKey.arrowDown) {
       final suggestions = _visibleSuggestions;
@@ -583,7 +650,6 @@ class FileTextFieldState extends State<FileTextField> {
         _closeSuggestions();
         return true;
       }
-      if (_visibleSuggestions.isEmpty) _closeSuggestions();
       return true;
     }
     return false;
@@ -799,7 +865,10 @@ class FileTextFieldState extends State<FileTextField> {
                       .toList(),
                   selectionStart: selection.start.clamp(0, text.length),
                   selectionEnd: selection.end.clamp(0, text.length),
-                  cursorOffset: component.focused && component.showCursor
+                  cursorOffset:
+                      component.focused &&
+                          component.showCursor &&
+                          _cursorVisible
                       ? selection.extentOffset.clamp(0, text.length)
                       : null,
                   cursorColor: cursorColor,

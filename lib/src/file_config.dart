@@ -130,38 +130,38 @@ class FileConfig {
     return FileConfig(
       typeStyles: {
         FileType.image: const FileStyle(
-          text: Colors.brightMagenta,
+          text: Colors.black,
           background: Colors.magenta,
           prefix: 'image',
           bold: true,
         ),
         FileType.document: const FileStyle(
-          text: Colors.brightBlue,
+          text: Colors.black,
           background: Colors.blue,
           prefix: 'document',
         ),
         FileType.code: const FileStyle(
-          text: Colors.brightGreen,
+          text: Colors.black,
           background: Colors.green,
           prefix: 'code',
         ),
         FileType.archive: const FileStyle(
-          text: Colors.brightYellow,
+          text: Colors.black,
           background: Colors.yellow,
           prefix: 'archive',
         ),
         FileType.audio: const FileStyle(
-          text: Colors.brightCyan,
+          text: Colors.black,
           background: Colors.cyan,
           prefix: 'audio',
         ),
         FileType.video: const FileStyle(
-          text: Colors.brightRed,
+          text: Colors.black,
           background: Colors.red,
           prefix: 'video',
         ),
         FileType.other: const FileStyle(
-          text: Colors.brightWhite,
+          text: Colors.black,
           background: Colors.grey,
           prefix: 'file',
         ),

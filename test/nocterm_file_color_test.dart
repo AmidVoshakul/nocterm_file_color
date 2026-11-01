@@ -461,6 +461,193 @@ void main() {
       },
     );
 
+    test('modifier enter inserts a newline in a multiline field', () async {
+      const modifiers = {
+        'ctrl': ModifierKeys(ctrl: true),
+        'shift': ModifierKeys(shift: true),
+        'alt': ModifierKeys(alt: true),
+      };
+
+      final controller = TextEditingController();
+
+      await testNocterm('modifier enter newline', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 30,
+            height: 4,
+            maxLines: 4,
+          ),
+        );
+
+        for (final entry in modifiers.entries) {
+          controller.text = 'ab';
+          controller.selection = TextSelection.collapsed(offset: 2);
+          await tester.pump();
+
+          await tester.sendKeyEvent(
+            KeyboardEvent(
+              logicalKey: LogicalKey.enter,
+              character: '\n',
+              modifiers: entry.value,
+            ),
+          );
+          await tester.pump();
+
+          expect(
+            controller.text,
+            'ab\n',
+            reason: '${entry.key}+Enter must insert a line break',
+          );
+          expect(
+            controller.selection.extentOffset,
+            3,
+            reason: 'caret must sit after the inserted ${entry.key} break',
+          );
+        }
+      });
+
+      controller.dispose();
+    });
+
+    test('plain enter still submits a multiline field', () async {
+      final controller = TextEditingController();
+      String? submitted;
+
+      await testNocterm('plain enter submits multiline', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 30,
+            height: 3,
+            maxLines: 3,
+            onSubmitted: (value) => submitted = value,
+          ),
+        );
+        controller.text = 'ab';
+        await tester.pump();
+
+        await tester.sendEnter();
+
+        expect(submitted, 'ab');
+        expect(controller.text, 'ab');
+      });
+
+      controller.dispose();
+    });
+
+    test('kitty ctrl+j inserts a newline in a multiline field', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('kitty ctrl+j newline', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 30,
+            height: 3,
+            maxLines: 3,
+          ),
+        );
+        controller.text = 'ab';
+        controller.selection = TextSelection.collapsed(offset: 2);
+        await tester.pump();
+
+        // Kitty terminals deliver Ctrl+J as `CSI 106;5u`, which parses as
+        // keyJ+ctrl rather than a bare byte 0x0A.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyJ,
+            character: 'j',
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+
+        expect(controller.text, 'ab\n');
+        expect(controller.selection.extentOffset, 3);
+      });
+
+      controller.dispose();
+    });
+
+    test('modified enter replaces a selected range with a newline', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('selection newline', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 30,
+            height: 3,
+            maxLines: 3,
+          ),
+        );
+        controller.text = 'abcd';
+        controller.selection = const TextSelection(
+          baseOffset: 1,
+          extentOffset: 3,
+        );
+        await tester.pump();
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.enter,
+            character: '\n',
+            modifiers: ModifierKeys(shift: true),
+          ),
+        );
+        await tester.pump();
+
+        expect(controller.text, 'a\nd');
+        expect(controller.selection.extentOffset, 2);
+      });
+
+      controller.dispose();
+    });
+
+    test('modified enter closes the menu and inserts a newline', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('menu newline', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 30,
+            height: 3,
+            maxLines: 3,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+        expect(key.currentState!.isSuggestionMenuOpen, isTrue);
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.enter,
+            character: '\n',
+            modifiers: ModifierKeys(shift: true),
+          ),
+        );
+        await tester.pump();
+
+        expect(key.currentState!.isSuggestionMenuOpen, isFalse);
+        expect(controller.text, '@\n');
+        expect(controller.selection.extentOffset, 2);
+      });
+
+      controller.dispose();
+    });
+
     test(
       'shows trigger text and preserves it when space closes the menu',
       () async {
@@ -801,7 +988,7 @@ void main() {
           expect(tester.terminalState, containsText('[main.dart]'));
           expect(
             tester.terminalState.getCellAt(1, 0)?.style.color,
-            Colors.brightGreen,
+            Colors.black,
           );
         });
 
@@ -828,6 +1015,82 @@ void main() {
 
         expect(controller.text, '[image 1] ');
         expect(tester.terminalState, containsText('[image 1]'));
+      });
+
+      controller.dispose();
+    });
+
+    test('reuses the image index freed by deleting a token', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('image index reuse', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 2,
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/a.png'));
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/b.png'));
+        expect(controller.text, '[image 1] [image 2] ');
+        expect(key.currentState!.getAttachedFiles(), hasLength(2));
+
+        // Remove the second token with Backspace: it must detach the file
+        // too, otherwise the index would still be taken.
+        controller.selection = TextSelection.collapsed(
+          offset: controller.text.length,
+        );
+        await tester.sendBackspace();
+        expect(controller.text, '[image 1] ');
+        expect(key.currentState!.getAttachedFiles(), hasLength(1));
+
+        // The freed number is available again, not skipped.
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/c.png'));
+        expect(controller.text, '[image 1] [image 2] ');
+        expect(
+          key.currentState!.getAttachedFiles().map((f) => f.name),
+          containsAll(['image 1', 'image 2']),
+        );
+      });
+
+      controller.dispose();
+    });
+
+    test('image indices stay unique after deleting the first one', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('image index uniqueness', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 2,
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/a.png'));
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/b.png'));
+        expect(controller.text, '[image 1] [image 2] ');
+
+        // Drop the first token by hand; the second keeps its number.
+        controller.selection = TextSelection.collapsed(offset: 0);
+        await tester.sendDelete();
+        expect(controller.text, '[image 2] ');
+
+        // The caret sits at offset 0 after the deletion, so the new token is
+        // inserted first and takes the number the deleted file gave up.
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/c.png'));
+        expect(controller.text, '[image 1] [image 2] ');
+        expect(
+          key.currentState!.getAttachedFiles().map((f) => f.name).toSet(),
+          {'image 1', 'image 2'},
+        );
       });
 
       controller.dispose();
@@ -1706,6 +1969,39 @@ void main() {
         );
 
         expect(tester.terminalState, containsText('No matches'));
+      });
+
+      controller.dispose();
+    });
+
+    test('menu reopens when a previously empty query matches again', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('reopen menu', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+        await tester.pump();
+        expect(tester.terminalState, containsText('/help'));
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.keyZ, character: 'z'),
+        );
+        await tester.pump();
+        expect(tester.terminalState, containsText('No matches'));
+
+        await tester.sendBackspace();
+        await tester.pump();
+        expect(tester.terminalState, containsText('/help'));
       });
 
       controller.dispose();

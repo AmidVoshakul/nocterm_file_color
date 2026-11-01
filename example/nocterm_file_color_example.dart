@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:nocterm/nocterm.dart';
 import 'package:nocterm_file_color/nocterm_file_color.dart';
 
@@ -18,7 +20,15 @@ void main() {
 /// [FileTextFieldState.selectedSuggestionIndex] through a [GlobalKey] and paints
 /// the panel wherever its layout needs it.
 class ComposerDemo extends StatefulComponent {
-  const ComposerDemo({super.key});
+  const ComposerDemo({super.key, this.onQuit = shutdownApp});
+
+  /// Called when the user quits with a bare Escape or Ctrl+C.
+  ///
+  /// Defaults to Nocterm's [shutdownApp] rather than `exit(0)`: the latter
+  /// skips terminal cleanup and leaves the cursor, mouse tracking and the
+  /// alternate screen broken. It needs a live [TerminalBinding], so tests
+  /// inject their own callback.
+  final VoidCallback onQuit;
 
   @override
   State<ComposerDemo> createState() => _ComposerDemoState();
@@ -77,6 +87,25 @@ class _ComposerDemoState extends State<ComposerDemo> {
     super.dispose();
   }
 
+  // -- Exit --
+
+  /// Restores the terminal line discipline, then quits via
+  /// [ComposerDemo.onQuit].
+  ///
+  /// Nocterm cancels its stdin subscription before re-enabling the terminal
+  /// modes, and dart:io refuses mode changes on a cancelled stdin
+  /// (dart-lang/sdk#49961), so the shell is left with `-echo`. The modes must
+  /// be restored here, while Nocterm still listens on stdin.
+  void _quit() {
+    try {
+      stdin.echoMode = true;
+      stdin.lineMode = true;
+    } catch (_) {
+      // Piped stdin, tests, or already-closed stdin; best effort.
+    }
+    component.onQuit();
+  }
+
   // -- Suggestions provider --
 
   /// Feeds the `@` and `/` menus. The field filters the result case
@@ -90,11 +119,7 @@ class _ComposerDemoState extends State<ComposerDemo> {
     final suggestions = <FileTextFieldSuggestion>[];
 
     if (trigger == '/') {
-      const commandStyle = FileStyle(
-        text: Colors.brightMagenta,
-        background: Colors.magenta,
-        bold: true,
-      );
+      const commandStyle = FileStyle(background: Colors.magenta, bold: true);
       suggestions.addAll(const [
         FileTextFieldSuggestion.command(name: 'review', style: commandStyle),
         FileTextFieldSuggestion.command(name: 'help', style: commandStyle),
@@ -117,13 +142,8 @@ class _ComposerDemoState extends State<ComposerDemo> {
         );
       }
 
-      const folderStyle = FileStyle(
-        text: Colors.brightYellow,
-        background: Colors.yellow,
-        bold: true,
-      );
+      const folderStyle = FileStyle(background: Colors.yellow, bold: true);
       const agentStyle = FileStyle(
-        text: Colors.brightCyan,
         background: Colors.cyan,
         bold: true,
         openingDelimiter: '',
@@ -245,6 +265,22 @@ class _ComposerDemoState extends State<ComposerDemo> {
                 });
                 return true;
               }
+              if (event.logicalKey == LogicalKey.escape) {
+                // While the mention menu is open, Escape belongs to the field:
+                // it closes the menu. Only a bare Escape quits.
+                if (_fieldKey.currentState?.isSuggestionMenuOpen ?? false) {
+                  return false;
+                }
+                _quit();
+                return true;
+              }
+              if (event.logicalKey == LogicalKey.keyC &&
+                  event.isControlPressed) {
+                // Nocterm's own Ctrl+C shutdown path is affected by the same
+                // stdin-ordering issue, so quit here instead (see _quit).
+                _quit();
+                return true;
+              }
               return false;
             },
             child: FileTextField(
@@ -254,6 +290,8 @@ class _ComposerDemoState extends State<ComposerDemo> {
               maxLines: 25,
               placeholder: 'Type a message with @agent or /command…',
               cursorColor: _agentColor,
+              style: TextStyle(color: _textColor),
+              cursorBlinkRate: Duration(milliseconds: 500),
               onSuggestionsRequested: _provideSuggestions,
               // The menu is drawn above the prompt by [_buildMenuPanel], so
               // the widget's own in-place menu is switched off here.
@@ -335,7 +373,7 @@ class _ComposerDemoState extends State<ComposerDemo> {
   Component build(BuildContext context) {
     return Container(
       color: _windowColor,
-      padding: const EdgeInsets.all(2),
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
       child: Column(
         mainAxisSize: MainAxisSize.max,
         crossAxisAlignment: CrossAxisAlignment.stretch,
