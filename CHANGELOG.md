@@ -1,12 +1,26 @@
 ## Unreleased
 
+### Features
+
+- **Multiline breaks**: Ctrl+Enter / Shift+Enter / Alt+Enter / Ctrl+J insert a newline in multiline fields instead of submitting, including while the suggestion menu is open.
+- **Suggestion menu pagination and navigation**: configurable `suggestionPageSize` (default 8), `suggestionCyclicScroll` (default true), and `suggestionScrollThreshold` (default 1). Adds PgUp/PgDn/Home/End, mouse wheel scrolling, matched substring highlighting, and public API `suggestionScrollOffset`, `suggestionPageSize`, `moveSuggestionHighlight`.
+
 ### Fixes
 
-- **Multiline breaks in `FileTextField`**: Ctrl+Enter / Shift+Enter / Alt+Enter in multiline fields (`maxLines > 1`) insert a newline instead of submitting — even while the `@`/`/` suggestion menu is open. Requires a terminal that reports modifiers (kitty protocol or modifyOtherKeys, e.g. alacritty, ghostty, kitty, WezTerm, Windows Terminal); in legacy VTE terminals (xfce4-terminal, terminator) Enter, Ctrl+Enter and Ctrl+J arrive as byte-identical sequences, so plain Enter / Ctrl+J keeps submitting.
-- **Default tag colors**: built-in `FileConfig.defaultConfig()` styles now draw black text on their colored backgrounds (`brightMagenta`, `brightBlue`, … on `magenta`, `blue`, … was hard to read), so menu-inserted and pasted tags render identically by default.
-- **Modified-Enter replaces the selection**: like a normal multi-line edit, a modified Enter now replaces a non-collapsed selection with the break instead of only inserting at the caret end.
-- **Suggestion menu reopens**: a query that yields no matches no longer closes the menu permanently; deleting back to a matching query repopulates it.
-- **Cursor blink restored**: while colored tags are rendered the field switches to an overlay, so Nocterm's native caret is hidden; the overlay now blinks the emulated caret at `cursorBlinkRate` (static when the rate is null), matching the plain-field behavior.
+- **Default tag colors**: `FileConfig.defaultConfig()` now uses black text on colored backgrounds for consistent rendering of pasted and menu-inserted tags.
+- **Image label counter**: reuses freed numbers to avoid gaps.
+- **Cursor blink**: restored in overlay mode with Timer-based emulation matching Nocterm.
+- **Suggestion menu reopen**: menu repopulates when a previously empty query matches again.
+- **Modified-Enter selection**: modified Enter now replaces a non-collapsed selection like native editing.
+- **Example app exit**: `_quit()` restores stdin modes before shutdown to fix echo bug.
+
+### Refactor
+
+- Removed duplicated newline-insertion logic; text editing now relies on Nocterm.
+
+### Examples
+
+- Host menu example now paginates to `pageSize` and forwards mouse wheel events.
 
 ## 0.0.2
 

@@ -113,6 +113,9 @@ class FileTextField extends StatefulComponent {
     this.suggestionMenuPlacement = SuggestionMenuPlacement.inline,
     this.suggestionMenuBuilder,
     this.slashAnchor = SlashAnchor.anywhere,
+    this.suggestionPageSize = 8,
+    this.suggestionCyclicScroll = true,
+    this.suggestionScrollThreshold = 1,
   }) : assert(maxLines == null || maxLines > 0),
        assert(minLines == null || minLines > 0),
        assert(
@@ -184,6 +187,18 @@ class FileTextField extends StatefulComponent {
   /// [SlashAnchor.anywhere], preserving 0.0.1 behavior.
   final SlashAnchor slashAnchor;
 
+  /// Maximum number of suggestion rows painted at once in the built-in menu.
+  final int suggestionPageSize;
+
+  /// Whether arrow-key navigation wraps around at the ends of the list.
+  final bool suggestionCyclicScroll;
+
+  /// How many rows from an edge the selection must reach before the visible
+  /// window scrolls. `1` (default) means the window scrolls once the selection
+  /// reaches the second-to-last / second-from-top row; `0` scrolls only when
+  /// the selection leaves the window entirely.
+  final int suggestionScrollThreshold;
+
   @override
   State<FileTextField> createState() => FileTextFieldState();
 }
@@ -207,6 +222,7 @@ class FileTextFieldState extends State<FileTextField> {
   int _suggestionStartOffset = 0;
   List<FileTextFieldSuggestion> _providedSuggestions = const [];
   int _selectedSuggestionIndex = 0;
+  int _suggestionScrollOffset = 0;
 
   // -- Public API: attachments ----------------------------------------------
 
@@ -301,6 +317,44 @@ class FileTextFieldState extends State<FileTextField> {
   /// menu highlights exactly the row the caret keys would accept.
   int get selectedSuggestionIndex =>
       _activeTrigger == null ? -1 : _selectedSuggestionIndex;
+
+  /// First index of the currently visible window into [visibleSuggestions].
+  ///
+  /// The built-in inline menu uses this together with [suggestionPageSize] to
+  /// paint only a slice of the suggestions; a host-rendered menu can mirror
+  /// the same window or ignore it and scroll on its own.
+  int get suggestionScrollOffset {
+    final count = _visibleSuggestions.length;
+    if (count == 0) return 0;
+    final pageSize = _effectiveSuggestionPageSize(count);
+    final maxOffset = (count - pageSize).clamp(0, count);
+    return _suggestionScrollOffset.clamp(0, maxOffset);
+  }
+
+  /// Configured page size for the suggestion menu (see
+  /// [FileTextField.suggestionPageSize]).
+  int get suggestionPageSize => component.suggestionPageSize;
+
+  /// Moves the highlighted suggestion by [delta] rows, applying the configured
+  /// cyclic/linear policy and scroll threshold. Intended for host-rendered
+  /// menus that want to drive highlighting from mouse or custom keys.
+  void moveSuggestionHighlight(int delta) {
+    final suggestions = _visibleSuggestions;
+    if (suggestions.isEmpty) return;
+    final count = suggestions.length;
+    _setSuggestionState(() {
+      if (component.suggestionCyclicScroll) {
+        _selectedSuggestionIndex =
+            (_selectedSuggestionIndex + delta + count) % count;
+      } else {
+        _selectedSuggestionIndex = (_selectedSuggestionIndex + delta).clamp(
+          0,
+          count - 1,
+        );
+      }
+      _adjustSuggestionScrollOffset();
+    });
+  }
 
   /// Whether the `@`/`/` suggestion menu is currently open.
   bool get isSuggestionMenuOpen =>
@@ -570,6 +624,7 @@ class FileTextFieldState extends State<FileTextField> {
       _activeTrigger = trigger;
       _suggestionQuery = '';
       _selectedSuggestionIndex = 0;
+      _suggestionScrollOffset = 0;
       _refreshSuggestions();
     });
     _replaceSuggestionInput('');
@@ -598,15 +653,58 @@ class FileTextFieldState extends State<FileTextField> {
       _closeSuggestions();
       return false;
     }
+    if (event.logicalKey == LogicalKey.pageDown ||
+        event.logicalKey == LogicalKey.pageUp) {
+      final suggestions = _visibleSuggestions;
+      if (suggestions.isNotEmpty) {
+        final count = suggestions.length;
+        final pageSize = _effectiveSuggestionPageSize(count);
+        final direction = event.logicalKey == LogicalKey.pageDown ? 1 : -1;
+        _setSuggestionState(() {
+          if (component.suggestionCyclicScroll) {
+            _selectedSuggestionIndex =
+                (_selectedSuggestionIndex + direction * pageSize + count) %
+                count;
+          } else {
+            _selectedSuggestionIndex =
+                (_selectedSuggestionIndex + direction * pageSize).clamp(
+                  0,
+                  count - 1,
+                );
+          }
+          _adjustSuggestionScrollOffset();
+        });
+      }
+      return true;
+    }
+    if (event.logicalKey == LogicalKey.home ||
+        event.logicalKey == LogicalKey.end) {
+      final suggestions = _visibleSuggestions;
+      if (suggestions.isNotEmpty) {
+        _setSuggestionState(() {
+          _selectedSuggestionIndex = event.logicalKey == LogicalKey.home
+              ? 0
+              : suggestions.length - 1;
+          _adjustSuggestionScrollOffset();
+        });
+      }
+      return true;
+    }
     if (event.logicalKey == LogicalKey.arrowUp ||
         event.logicalKey == LogicalKey.arrowDown) {
       final suggestions = _visibleSuggestions;
       if (suggestions.isNotEmpty) {
         final direction = event.logicalKey == LogicalKey.arrowDown ? 1 : -1;
         _setSuggestionState(() {
-          _selectedSuggestionIndex =
-              (_selectedSuggestionIndex + direction + suggestions.length) %
-              suggestions.length;
+          final count = suggestions.length;
+          if (component.suggestionCyclicScroll) {
+            _selectedSuggestionIndex =
+                (_selectedSuggestionIndex + direction + count) % count;
+          } else {
+            _selectedSuggestionIndex = (_selectedSuggestionIndex + direction)
+                .clamp(0, count - 1);
+          }
+          _adjustSuggestionScrollOffset();
         });
       }
       return true;
@@ -629,7 +727,10 @@ class FileTextFieldState extends State<FileTextField> {
         _replaceSuggestionInput(query);
         _setSuggestionState(() {
           _suggestionQuery = query;
+          _suggestionScrollOffset = 0;
           _refreshSuggestions();
+          _selectedSuggestionIndex = 0;
+          _adjustSuggestionScrollOffset();
         });
       }
       return true;
@@ -644,7 +745,10 @@ class FileTextFieldState extends State<FileTextField> {
       _replaceSuggestionInput(query);
       _setSuggestionState(() {
         _suggestionQuery = query;
+        _suggestionScrollOffset = 0;
         _refreshSuggestions();
+        _selectedSuggestionIndex = 0;
+        _adjustSuggestionScrollOffset();
       });
       if (_activeTrigger == '/' && query.contains('/')) {
         _closeSuggestions();
@@ -661,6 +765,7 @@ class FileTextFieldState extends State<FileTextField> {
       _suggestionQuery = '';
       _providedSuggestions = const [];
       _selectedSuggestionIndex = 0;
+      _suggestionScrollOffset = 0;
     });
   }
 
@@ -693,6 +798,7 @@ class FileTextFieldState extends State<FileTextField> {
         ? const []
         : List.unmodifiable(provider(trigger, _suggestionQuery));
     _selectedSuggestionIndex = 0;
+    _suggestionScrollOffset = 0;
   }
 
   List<FileTextFieldSuggestion> get _visibleSuggestions {
@@ -700,6 +806,45 @@ class FileTextFieldState extends State<FileTextField> {
     return _providedSuggestions
         .where((suggestion) => suggestion.searchableText.contains(query))
         .toList();
+  }
+
+  int _effectiveSuggestionPageSize(int itemCount) {
+    if (itemCount <= 0) return 1;
+    final size = component.suggestionPageSize.clamp(1, itemCount);
+    return size;
+  }
+
+  void _adjustSuggestionScrollOffset() {
+    final suggestions = _visibleSuggestions;
+    final count = suggestions.length;
+    if (count == 0) {
+      _suggestionScrollOffset = 0;
+      return;
+    }
+    final pageSize = _effectiveSuggestionPageSize(count);
+    if (count <= pageSize) {
+      _suggestionScrollOffset = 0;
+      return;
+    }
+    final threshold = component.suggestionScrollThreshold.clamp(
+      0,
+      pageSize - 1,
+    );
+    final maxOffset = count - pageSize;
+    _suggestionScrollOffset = _suggestionScrollOffset.clamp(0, maxOffset);
+    var position = _selectedSuggestionIndex - _suggestionScrollOffset;
+    // Scroll down when the selection reaches the (threshold+1)-th from bottom.
+    while (position >= pageSize - threshold - 1 &&
+        _suggestionScrollOffset < maxOffset) {
+      _suggestionScrollOffset++;
+      position = _selectedSuggestionIndex - _suggestionScrollOffset;
+    }
+    // Scroll up when the selection reaches the (threshold+1)-th from top.
+    while (position <= threshold && _suggestionScrollOffset > 0) {
+      _suggestionScrollOffset--;
+      position = _selectedSuggestionIndex - _suggestionScrollOffset;
+    }
+    _suggestionScrollOffset = _suggestionScrollOffset.clamp(0, maxOffset);
   }
 
   void _selectSuggestion(FileTextFieldSuggestion suggestion) {
@@ -917,26 +1062,118 @@ class FileTextFieldState extends State<FileTextField> {
   Component _buildDefaultSuggestionMenu(
     List<FileTextFieldSuggestion> suggestions,
   ) {
-    return Container(
-      width: component.width,
-      padding: const EdgeInsets.symmetric(vertical: 1),
-      decoration: BoxDecoration(border: BoxBorder.all(color: Colors.gray)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: suggestions.isEmpty
-            ? [const Text('No matches', style: TextStyle(color: Colors.gray))]
-            : [
-                for (var index = 0; index < suggestions.length; index++)
-                  GestureDetector(
-                    onTap: () => _selectSuggestion(suggestions[index]),
-                    child: Text(
-                      '${index == _selectedSuggestionIndex ? '> ' : '  '}'
-                      '${suggestions[index].displayLabel}',
+    final pageSize = suggestions.isEmpty
+        ? 1
+        : _effectiveSuggestionPageSize(suggestions.length);
+    final maxOffset = suggestions.isEmpty
+        ? 0
+        : (suggestions.length - pageSize).clamp(0, suggestions.length);
+    final offset = _suggestionScrollOffset.clamp(0, maxOffset);
+    final windowEnd = (offset + pageSize).clamp(0, suggestions.length);
+    final visible = suggestions.isEmpty
+        ? const <FileTextFieldSuggestion>[]
+        : suggestions.sublist(offset, windowEnd);
+
+    return MouseRegion(
+      onHover: (event) {
+        if (event.button == MouseButton.wheelUp) {
+          _handleSuggestionWheel(-1);
+        } else if (event.button == MouseButton.wheelDown) {
+          _handleSuggestionWheel(1);
+        }
+      },
+      child: Container(
+        width: component.width,
+        padding: const EdgeInsets.symmetric(vertical: 1),
+        decoration: BoxDecoration(border: BoxBorder.all(color: Colors.gray)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: suggestions.isEmpty
+              ? [const Text('No matches', style: TextStyle(color: Colors.gray))]
+              : [
+                  for (var i = 0; i < visible.length; i++)
+                    GestureDetector(
+                      onTap: () => _selectSuggestion(visible[i]),
+                      child: RichText(
+                        text: TextSpan(
+                          children: _highlightedSuggestionRow(
+                            prefix: offset + i == _selectedSuggestionIndex
+                                ? '> '
+                                : '  ',
+                            label: visible[i].displayLabel,
+                            query: _suggestionQuery,
+                            selected: offset + i == _selectedSuggestionIndex,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-              ],
+                ],
+        ),
       ),
     );
+  }
+
+  List<TextSpan> _highlightedSuggestionRow({
+    required String prefix,
+    required String label,
+    required String query,
+    required bool selected,
+  }) {
+    final baseColor = selected ? Colors.black : Colors.white;
+    final baseStyle = TextStyle(color: baseColor);
+    final highlightStyle = TextStyle(
+      color: baseColor,
+      fontWeight: FontWeight.bold,
+    );
+    final spans = <TextSpan>[TextSpan(text: prefix, style: baseStyle)];
+    if (query.isEmpty) {
+      spans.add(TextSpan(text: label, style: baseStyle));
+      return spans;
+    }
+    final lowerLabel = label.toLowerCase();
+    final lowerQuery = query.toLowerCase();
+    var start = 0;
+    var index = lowerLabel.indexOf(lowerQuery, start);
+    while (index >= 0) {
+      if (index > start) {
+        spans.add(
+          TextSpan(text: label.substring(start, index), style: baseStyle),
+        );
+      }
+      spans.add(
+        TextSpan(
+          text: label.substring(index, index + query.length),
+          style: highlightStyle,
+        ),
+      );
+      start = index + query.length;
+      index = lowerLabel.indexOf(lowerQuery, start);
+    }
+    if (start < label.length) {
+      spans.add(TextSpan(text: label.substring(start), style: baseStyle));
+    }
+    if (spans.length == 1) {
+      spans.add(TextSpan(text: label, style: baseStyle));
+    }
+    return spans;
+  }
+
+  void _handleSuggestionWheel(int direction) {
+    final suggestions = _visibleSuggestions;
+    if (suggestions.isEmpty) return;
+    final count = suggestions.length;
+    _setSuggestionState(() {
+      if (component.suggestionCyclicScroll) {
+        _selectedSuggestionIndex =
+            (_selectedSuggestionIndex + direction + count) % count;
+      } else {
+        _selectedSuggestionIndex = (_selectedSuggestionIndex + direction).clamp(
+          0,
+          count - 1,
+        );
+      }
+      _adjustSuggestionScrollOffset();
+    });
   }
 
   void _handleInlineTapDown(TapDownDetails details) {

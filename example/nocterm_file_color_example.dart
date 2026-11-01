@@ -121,7 +121,9 @@ class _ComposerDemoState extends State<ComposerDemo> {
     if (trigger == '/') {
       const commandStyle = FileStyle(background: Colors.magenta, bold: true);
       suggestions.addAll(const [
+        FileTextFieldSuggestion.command(name: 'init', style: commandStyle),
         FileTextFieldSuggestion.command(name: 'review', style: commandStyle),
+        FileTextFieldSuggestion.command(name: 'compact', style: commandStyle),
         FileTextFieldSuggestion.command(name: 'help', style: commandStyle),
         FileTextFieldSuggestion.command(name: 'clear', style: commandStyle),
         FileTextFieldSuggestion.command(name: 'model', style: commandStyle),
@@ -131,6 +133,8 @@ class _ComposerDemoState extends State<ComposerDemo> {
         'example/nocterm_file_color_example.dart',
         'lib/src/file_text_field.dart',
         'README.md',
+        'CHANGELOG.md',
+        'lib/src/file_info.dart',
       ]) {
         final file = FileInfo.fromPath(path);
         suggestions.add(
@@ -152,9 +156,11 @@ class _ComposerDemoState extends State<ComposerDemo> {
       suggestions.addAll(const [
         FileTextFieldSuggestion.folder(name: 'example/', style: folderStyle),
         FileTextFieldSuggestion.folder(name: 'lib/', style: folderStyle),
+        FileTextFieldSuggestion.folder(name: 'test/', style: folderStyle),
         FileTextFieldSuggestion.agent(name: 'explore', style: agentStyle),
         FileTextFieldSuggestion.agent(name: 'general', style: agentStyle),
         FileTextFieldSuggestion.agent(name: 'code-reviewer', style: agentStyle),
+        FileTextFieldSuggestion.agent(name: 'debugger', style: agentStyle),
       ]);
     }
 
@@ -169,29 +175,51 @@ class _ComposerDemoState extends State<ComposerDemo> {
   // the prompt keeps its bar. [FileTextFieldState] supplies the rows, the
   // highlighted index and programmatic selection.
   Component _buildMenuPanel() {
-    final suggestions = _fieldKey.currentState?.visibleSuggestions ?? const [];
-    final selectedIndex = _fieldKey.currentState?.selectedSuggestionIndex ?? -1;
+    final state = _fieldKey.currentState;
+    final suggestions = state?.visibleSuggestions ?? const [];
+    final selectedIndex = state?.selectedSuggestionIndex ?? -1;
     if (suggestions.isEmpty) return const SizedBox.shrink();
+
+    final pageSize = state?.suggestionPageSize ?? 8;
+    final offset = (state?.suggestionScrollOffset ?? 0).clamp(
+      0,
+      suggestions.isEmpty
+          ? 0
+          : (suggestions.length - pageSize).clamp(0, suggestions.length),
+    );
+    final end = (offset + pageSize).clamp(0, suggestions.length);
+    final visible = suggestions.sublist(offset, end);
 
     // A left-only border is what draws the panel's bar; Nocterm also reserves
     // one row above and below it, which is the spacing we want anyway.
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 1),
-      decoration: BoxDecoration(
-        color: _menuColor,
-        border: BoxBorder(left: BorderSide(color: _borderColor, width: 1.0)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (var index = 0; index < suggestions.length; index++)
-            _buildMenuRow(
-              index,
-              suggestions[index],
-              highlighted: index == selectedIndex || index == _menuHoverIndex,
-            ),
-        ],
+    return MouseRegion(
+      onHover: (event) {
+        if (event.button == MouseButton.wheelUp) {
+          state?.moveSuggestionHighlight(-1);
+        } else if (event.button == MouseButton.wheelDown) {
+          state?.moveSuggestionHighlight(1);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 1),
+        decoration: BoxDecoration(
+          color: _menuColor,
+          border: BoxBorder(left: BorderSide(color: _borderColor, width: 1.0)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < visible.length; i++)
+              _buildMenuRow(
+                offset + i,
+                visible[i],
+                highlighted:
+                    offset + i == selectedIndex ||
+                    offset + i == _menuHoverIndex,
+              ),
+          ],
+        ),
       ),
     );
   }

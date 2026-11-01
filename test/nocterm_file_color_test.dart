@@ -2007,6 +2007,258 @@ void main() {
       controller.dispose();
     });
 
+    test('suggestion menu windows to suggestionPageSize rows', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('window size', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            suggestionPageSize: 3,
+            onSuggestionsRequested: (trigger, query) => List.generate(
+              10,
+              (i) => FileTextFieldSuggestion.command(
+                name: 'cmd$i',
+                style: const FileStyle(),
+              ),
+            ),
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+        await tester.pump();
+
+        // only 3 rows rendered
+        expect(tester.terminalState, containsText('cmd0'));
+        expect(tester.terminalState, containsText('cmd1'));
+        expect(tester.terminalState, containsText('cmd2'));
+        expect(tester.terminalState, isNot(containsText('cmd3')));
+      });
+
+      controller.dispose();
+    });
+
+    test(
+      'suggestion scroll triggers at second-to-last row by default',
+      () async {
+        final controller = TextEditingController();
+        final key = GlobalKey<FileTextFieldState>();
+
+        await testNocterm('scroll trigger', (tester) async {
+          await tester.pumpComponent(
+            FileTextField(
+              key: key,
+              controller: controller,
+              focused: true,
+              width: 40,
+              height: 1,
+              suggestionPageSize: 4,
+              onSuggestionsRequested: (trigger, query) => List.generate(
+                10,
+                (i) => FileTextFieldSuggestion.command(
+                  name: 'cmd$i',
+                  style: const FileStyle(),
+                ),
+              ),
+            ),
+          );
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+          );
+          await tester.pump();
+
+          // move down to the second-to-last visible (index 2 of window = cmd2)
+          await tester.sendArrowDown();
+          await tester.pump();
+          await tester.sendArrowDown();
+          await tester.pump();
+          // selected = cmd2 (second-to-last of 4) -> scroll should fire
+          expect(key.currentState!.selectedSuggestionIndex, 2);
+          await tester.sendArrowDown();
+          await tester.pump();
+          // after scroll, window shifts; cmd3 should now be visible
+          expect(tester.terminalState, containsText('cmd3'));
+        });
+
+        controller.dispose();
+      },
+    );
+
+    test('suggestion cyclic scroll false clamps at the end', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('no cyclic', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            suggestionPageSize: 3,
+            suggestionCyclicScroll: false,
+            onSuggestionsRequested: (trigger, query) => List.generate(
+              5,
+              (i) => FileTextFieldSuggestion.command(
+                name: 'cmd$i',
+                style: const FileStyle(),
+              ),
+            ),
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+        await tester.pump();
+
+        for (var i = 0; i < 10; i++) {
+          await tester.sendArrowDown();
+          await tester.pump();
+        }
+        expect(key.currentState!.selectedSuggestionIndex, 4);
+      });
+
+      controller.dispose();
+    });
+
+    test('page down and page up move by pageSize', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('page keys', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            suggestionPageSize: 3,
+            suggestionCyclicScroll: false,
+            onSuggestionsRequested: (trigger, query) => List.generate(
+              10,
+              (i) => FileTextFieldSuggestion.command(
+                name: 'cmd$i',
+                style: const FileStyle(),
+              ),
+            ),
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+        await tester.pump();
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.pageDown),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 3);
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.pageUp),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 0);
+      });
+
+      controller.dispose();
+    });
+
+    test('home and end jump to first and last', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('home end', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            suggestionPageSize: 3,
+            suggestionCyclicScroll: false,
+            onSuggestionsRequested: (trigger, query) => List.generate(
+              10,
+              (i) => FileTextFieldSuggestion.command(
+                name: 'cmd$i',
+                style: const FileStyle(),
+              ),
+            ),
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+        await tester.pump();
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.end),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 9);
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.home),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 0);
+      });
+
+      controller.dispose();
+    });
+
+    test('mouse wheel moves suggestion selection', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('wheel', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            suggestionPageSize: 3,
+            onSuggestionsRequested: (trigger, query) => List.generate(
+              10,
+              (i) => FileTextFieldSuggestion.command(
+                name: 'cmd$i',
+                style: const FileStyle(),
+              ),
+            ),
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 0);
+
+        await tester.sendMouseEvent(
+          const MouseEvent(
+            button: MouseButton.wheelDown,
+            x: 1,
+            y: 1,
+            pressed: true,
+          ),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 1);
+      });
+
+      controller.dispose();
+    });
+
     test(
       'creates and disposes its own controller when none is given',
       () async {

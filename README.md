@@ -19,6 +19,8 @@ subagents listed with a keyboard-highlighted row](https://raw.githubusercontent.
 - **Host-owned suggestion menus** – the application supplies `@` and `/`
   candidates (`FileTextFieldSuggestion.file`, `.folder`, `.agent`, `.command`);
   the field filters, selects, and inserts them.
+- **Configurable suggestion menu** – `suggestionPageSize`, `suggestionCyclicScroll`, `suggestionScrollThreshold`, PgUp/PgDn/Home/End, mouse wheel, and matched substring highlighting.
+- **Multiline input** – Ctrl+Enter / Shift+Enter / Alt+Enter / Ctrl+J insert newlines in multiline fields, even with the suggestion menu open.
 - **Optional `/` anchor** – `slashAnchor: SlashAnchor.startOnly` restricts the
   slash menu to the very start of the field; the default opens it at any word
   boundary.
@@ -30,7 +32,7 @@ subagents listed with a keyboard-highlighted row](https://raw.githubusercontent.
 ```yaml
 dependencies:
   nocterm: ^0.9.0
-  nocterm_file_color: ^0.0.2
+  nocterm_file_color: ^0.0.3
 ```
 
 ## Usage

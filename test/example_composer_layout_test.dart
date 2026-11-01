@@ -53,7 +53,7 @@ void main() {
         // Menu rows are painted above the field's input row: the last menu
         // row sits above the input.
         final lastMenuRow = lines.lastIndexWhere(
-          (line) => line.contains('@code-reviewer'),
+          (line) => line.contains('test/'),
         );
         final inputRow = _inputRow(lines);
         expect(lastMenuRow, greaterThan(-1));
@@ -92,7 +92,7 @@ void main() {
         final lines = tester.terminalState.getText().split('\n');
 
         // Menu rows appear before the input field.
-        final menuRow = lines.indexWhere((line) => line.contains('@explore'));
+        final menuRow = lines.indexWhere((line) => line.contains('README.md'));
         final inputRow = _inputRow(lines);
         expect(menuRow, greaterThan(-1));
         expect(menuRow, lessThan(inputRow));
@@ -115,7 +115,7 @@ void main() {
         const promptBorder = Colors.yellow;
 
         final lastMenuRow = lines.lastIndexWhere(
-          (line) => line.contains('@code-reviewer'),
+          (line) => line.contains('test/'),
         );
         final inputRow = _inputRow(lines);
         expect(lastMenuRow, greaterThan(-1));
