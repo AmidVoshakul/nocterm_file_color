@@ -1,3 +1,12 @@
+## 0.0.4
+
+### Features
+
+- **Paste collapse**: large pastes (3+ lines, or 150+ characters) are shown as a `[Pasted ~N lines]` tag, expanded automatically on submit; removable as one unit. Line count and length are measured on the trimmed text, and the collapsed text is stored trimmed — the tag supplies its own separators. Thresholds match opencode's `[Pasted ~N lines]` behaviour and are configurable via `enablePasteCollapse`, `pasteCollapseMinLines` (default 3), `pasteCollapseMinChars` (default 150), `pasteStyle`.
+- Pasted paths are no longer guessed from prose: a line counts as a pasted path only when every token on it is path-shaped (carries a separator or an extension). A paragraph that merely mentions `/commands` or `[lib/main.dart]` collapses into one paste tag instead of shredding into attachments.
+- Collapsed pastes are anchored to the text range they occupy (extmark-style) rather than to their label, so identical paste labels keep their own spans and expand to their own content.
+- Token removal keeps the separator the user typed: a tag carries its own trailing separator, and removing a tag consumes only that one instead of reaching back for the space before it.
+
 ## 0.0.3
 
 ### Features

@@ -1,5 +1,4 @@
-A Nocterm `TextField` wrapper that displays attached files and colored tokens
-inline in the input line.
+# **Nocterm File Color** - A Nocterm `TextField` wrapper that displays attached files and colored tokens inline in the input line.
 
 ![A composer prompt with colored inline tokens: a pasted file and an agent
 mention shown as colored tags, plus the agent and model line below the
@@ -8,32 +7,19 @@ input](https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/sc
 ![The same prompt with the @ mention menu open above it: files, folders, and
 subagents listed with a keyboard-highlighted row](https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/screenshots/input-menu.png)
 
-## Features
-
-- **Inline file attachments** – paste a path or attach programmatically;
-  `[lib/main.dart]` and `[image 1]` labels are colored in place; Backspace
-  removes a token and detaches the file as one unit.
-- **Colored tokens** – `InlineToken` entries paint `@mentions`, `/commands`, or
-  any substring; styles support colors, `bold`, `italic`, `underline`, and
-  square, custom, or no brackets around the label.
-- **Host-owned suggestion menus** – the application supplies `@` and `/`
-  candidates (`FileTextFieldSuggestion.file`, `.folder`, `.agent`, `.command`);
-  the field filters, selects, and inserts them.
-- **Configurable suggestion menu** – `suggestionPageSize`, `suggestionCyclicScroll`, `suggestionScrollThreshold`, PgUp/PgDn/Home/End, mouse wheel, and matched substring highlighting.
-- **Suggestion menu styling** – `SuggestionMenuStyle` configures background, border (any sides or none), selected/item colors, padding, and the highlight marker (default none).
-- **Multiline input** – Ctrl+Enter / Shift+Enter / Alt+Enter / Ctrl+J insert newlines in multiline fields, even with the suggestion menu open.
-- **Optional `/` anchor** – `slashAnchor: SlashAnchor.startOnly` restricts the
-  slash menu to the very start of the field; the default opens it at any word
-  boundary.
-- **Token components** – `TokenHighlightTextField` for editable input and
-  `TokenText` for read-only previews.
+The `FileTextField` wraps the standard `TextField` and keeps its plain-text
+`TextEditingController` value. Paste or mention a file, folder, agent, command and it becomes a
+colored tag (`[lib/main.dart]`, `[image 1]`, `[image 2]`, `[lib/]`, `@agent`, `/command`) you can click; a large paste collapses into a single
+`[Pasted ~N lines]` tag that expands again when the message is sent; the `@`
+and `/` menus are either drawn by the package or handed to your own layout.
+Everything attached stays available through `getAttachedFiles()`.
 
 ## Getting Started
 
 ```yaml
 dependencies:
   nocterm: ^0.9.0
-  nocterm_file_color: ^0.0.3
+  nocterm_file_color: ^0.0.4
 ```
 
 ## Usage
@@ -80,6 +66,14 @@ final config = FileConfig.defaultConfig();
 FileTextFieldSuggestion.file(file, style: config.styleFor(file));
 ```
 
+## Pasting
+
+Pastes of 3+ lines or 150+ characters collapse into a `[Pasted ~N lines]`
+tag, which expands again when the message is submitted and deletes as one
+unit. Off it, or retune it, with `enablePasteCollapse`,
+`pasteCollapseMinLines`, `pasteCollapseMinChars` and `pasteStyle`; read what
+back with `getPastedTexts()` or `getExpandedText()`.
+
 ## Coloring tokens
 
 Beyond files, arbitrary strings are colored by `InlineToken` entries. Each
@@ -115,20 +109,6 @@ FileStyle(openingDelimiter: '<', closingDelimiter: '>')  // → <lib/main.dart>
 FileStyle(openingDelimiter: '', closingDelimiter: '')    // →  lib/main.dart
 ```
 
-## Suggestions
-
-- `FileTextFieldSuggestion.file` inserts a colored token and registers an
-  attachment, retrievable via `getAttachedFiles()`; `.folder`, `.agent`, and
-  `.command` insert app-specific tokens only.
-- Clicking a colored file token reports `onFileClick`, or opens the file
-  location in the platform file manager by default.
-- The provider receives `@` or `/` plus the query; the field filters the
-  returned candidates case-insensitively by `name` and `searchText`.
-- `FileStyle` colors the inserted token; menu labels render neutrally unless
-  a `suggestionMenuBuilder` provides a custom menu component.
-- `onSuggestionSelected` reports the selection to the host; the package never
-  executes agents or commands.
-
 ### Rendering the menu yourself
 
 By default `FileTextField` paints a neutral menu directly above the input.
@@ -137,12 +117,19 @@ Replace it in place with `suggestionMenuBuilder`, or drop it entirely with
 instance as a separate panel above your own prompt container.
 
 ```dart
+class MyComposer extends StatefulComponent {
+  const MyComposer({super.key});
+
+  @override
+  State<MyComposer> createState() => _MyComposerState();
+}
+
 class _MyComposerState extends State<MyComposer> {
   final fieldKey = GlobalKey<FileTextFieldState>();
   final controller = TextEditingController();
 
   @override
-  Widget build(BuildContext context) {
+  Component build(BuildContext context) {
     final menu = fieldKey.currentState?.visibleSuggestions ?? const [];
     final selected = fieldKey.currentState?.selectedSuggestionIndex ?? -1;
 
@@ -186,12 +173,12 @@ inside the package either way. See `example/` for a full implementation.
 
 | Type | Color |
 |------|-------|
-| Image | Magenta |
-| Document | Blue |
-| Code | Green |
-| Archive | Yellow |
-| Audio / Video | Cyan |
-| Other | Grey |
+| **Image** | Magenta |
+| **Document** | Blue |
+| **Code** | Green |
+| **Archive** | Yellow |
+| **Audio** / Video | Cyan |
+| **Other** | Grey |
 
 Tune defaults per type and overrides per extension with `FileConfig`.
 

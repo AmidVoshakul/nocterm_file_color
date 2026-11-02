@@ -27,11 +27,41 @@ enum SuggestionMenuPlacement {
 }
 
 class _InlineToken {
-  const _InlineToken({required this.token, required this.style, this.file});
+  const _InlineToken({
+    required this.token,
+    required this.style,
+    this.file,
+    this.pastedText,
+    this.start,
+    this.end,
+  });
 
   final String token;
   final FileStyle style;
   final FileInfo? file;
+
+  /// Full text collapsed into this token when it represents a large paste.
+  final String? pastedText;
+
+  /// Half-open range `[start, end)` of [token] inside the controller text.
+  ///
+  /// An extmark-style anchor: expansion and removal act on the span the user
+  /// sees, not on the first lookalike match.
+  final int? start;
+  final int? end;
+
+  bool get isPasted => pastedText != null;
+
+  _InlineToken withRange(int from, int to) {
+    return _InlineToken(
+      token: token,
+      style: style,
+      file: file,
+      pastedText: pastedText,
+      start: from,
+      end: to,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +145,15 @@ class FileTextField extends StatefulComponent {
     this.suggestionMenuBuilder,
     this.slashAnchor = SlashAnchor.anywhere,
     this.suggestionMenuStyle = const SuggestionMenuStyle(),
+    this.enablePasteCollapse = true,
+    this.pasteCollapseMinLines = 3,
+    this.pasteCollapseMinChars = 150,
+    this.pasteStyle = const FileStyle(
+      text: Colors.brightWhite,
+      background: Colors.grey,
+      bold: true,
+    ),
+    this.onPastedChanged,
     this.suggestionPageSize = 8,
     this.suggestionCyclicScroll = true,
     this.suggestionScrollThreshold = 1,
@@ -192,6 +231,22 @@ class FileTextField extends StatefulComponent {
   /// Visual style for the built-in suggestion menu.
   final SuggestionMenuStyle suggestionMenuStyle;
 
+  /// Whether large pastes are collapsed into a `[Pasted ~N lines]` tag.
+  final bool enablePasteCollapse;
+
+  /// Minimum number of lines in a paste before it is collapsed.
+  final int pasteCollapseMinLines;
+
+  /// Minimum number of characters in a paste before it is collapsed (for
+  /// single-line pastes).
+  final int pasteCollapseMinChars;
+
+  /// Style used for collapsed paste tags.
+  final FileStyle pasteStyle;
+
+  /// Called whenever the set of collapsed pastes changes.
+  final ValueChanged<List<String>>? onPastedChanged;
+
   /// Maximum number of suggestion rows painted at once in the built-in menu.
   final int suggestionPageSize;
 
@@ -236,6 +291,53 @@ class FileTextFieldState extends State<FileTextField> {
   /// Call this before sending the message to the AI model to include all
   /// attachments in the context.
   List<FileInfo> getAttachedFiles() => List.unmodifiable(_attachedFiles);
+
+  /// Returns the full text of every collapsed paste currently in the field.
+  List<String> getPastedTexts() => List.unmodifiable(
+    _inlineTokens
+        .where((token) => token.isPasted)
+        .map((token) => token.pastedText!)
+        .toList(),
+  );
+
+  /// Returns the field text with every collapsed paste tag expanded back to
+  /// its full text.
+  /// Returns the field text with every collapsed paste tag expanded back to
+  /// its full text. Without collapsed pastes the text comes back untouched, so
+  /// a submit observes exactly what the controller holds. Re-anchors ranges as
+  /// a side effect, since callers (submit, hosts) run outside a build.
+  String getExpandedText() {
+    final text = _controller.text;
+    final pasted = _inlineTokens.where((token) => token.isPasted).toList();
+    if (pasted.isEmpty) return text;
+
+    _anchorTokens(text);
+
+    final replacements = <(int start, int end, String text)>[];
+    for (final token in pasted) {
+      final start = token.start;
+      final end = token.end;
+      if (start != null && end != null) {
+        replacements.add((start, end, token.pastedText!));
+      }
+    }
+
+    // Expand right to left so the offsets stay valid.
+    replacements.sort((a, b) => b.$1.compareTo(a.$1));
+    var result = text;
+    for (final range in replacements) {
+      result =
+          result.substring(0, range.$1) + range.$3 + result.substring(range.$2);
+    }
+    return result.trimRight();
+  }
+
+  /// Replaces every collapsed paste tag in the field with its full text.
+  void expandPastedText() {
+    setState(() {
+      _controller.text = getExpandedText();
+    });
+  }
 
   /// Adds a file to the attachment list and inserts its token into the text.
   void attachFile(FileInfo file, {FileStyle? style}) {
@@ -296,6 +398,7 @@ class FileTextFieldState extends State<FileTextField> {
       _selectedSuggestionIndex = 0;
       _controller.clear();
       _notifyFilesChanged();
+      _notifyPastedChanged();
     });
   }
 
@@ -408,7 +511,10 @@ class FileTextFieldState extends State<FileTextField> {
     final insertion =
         '${needsLeadingSpace ? ' ' : ''}${inlineToken.token}${needsTrailingSpace ? ' ' : ''}';
     final newText = '$before$insertion$after';
-    _inlineTokens.add(inlineToken);
+    final tokenStart = insertOffset + (needsLeadingSpace ? 1 : 0);
+    _inlineTokens.add(
+      inlineToken.withRange(tokenStart, tokenStart + inlineToken.token.length),
+    );
     _controller.text = newText;
     _controller.selection = TextSelection.collapsed(
       offset: insertOffset + insertion.length,
@@ -434,12 +540,15 @@ class FileTextFieldState extends State<FileTextField> {
     );
   }
 
+  /// Range a token occupies together with the separator it brings. The
+  /// trailing one is preferred: a token always carries it, so removal never
+  /// reaches back for the space the user typed before the token.
   (int, int) _attachmentRemovalRange(String text, int start, int end) {
-    if (start > 0 && text[start - 1].trim().isEmpty) {
-      return (start - 1, end);
-    }
     if (end < text.length && text[end].trim().isEmpty) {
       return (start, end + 1);
+    }
+    if (start > 0 && text[start - 1].trim().isEmpty) {
+      return (start - 1, end);
     }
     return (start, end);
   }
@@ -477,19 +586,72 @@ class FileTextFieldState extends State<FileTextField> {
 
   void _syncAttachmentsFromText() {
     final text = _controller.text;
-    _inlineTokens.removeWhere(
-      (inlineToken) => !text.contains(inlineToken.token),
-    );
-    final toRemove = _attachedFiles.where((file) {
-      return !_inlineTokens.any(
-        (inlineToken) =>
-            inlineToken.file == file && text.contains(inlineToken.token),
-      );
-    }).toList();
-    if (toRemove.isEmpty) return;
+    _anchorTokens(text);
 
-    _attachedFiles.removeWhere(toRemove.contains);
-    _notifyFilesChanged();
+    final uniqueTokens = _inlineTokens.map((t) => t.token).toSet();
+    final counts = <String, int>{};
+    for (final token in uniqueTokens) {
+      counts[token] = _countOccurrences(text, token);
+    }
+
+    final remaining = Map<String, int>.from(counts);
+    final toRemoveTokens = <_InlineToken>[];
+    for (final inlineToken in _inlineTokens.toList()) {
+      if ((remaining[inlineToken.token] ?? 0) > 0) {
+        remaining[inlineToken.token] = remaining[inlineToken.token]! - 1;
+      } else {
+        toRemoveTokens.add(inlineToken);
+      }
+    }
+    final removedPasted = toRemoveTokens.any((t) => t.isPasted);
+    for (final inlineToken in toRemoveTokens) {
+      _inlineTokens.remove(inlineToken);
+    }
+
+    final toRemove = _attachedFiles.where((file) {
+      return !_inlineTokens.any((inlineToken) => inlineToken.file == file);
+    }).toList();
+    if (toRemove.isNotEmpty) {
+      _attachedFiles.removeWhere(toRemove.contains);
+      _notifyFilesChanged();
+    }
+    if (removedPasted) _notifyPastedChanged();
+  }
+
+  /// Re-binds tokens to the span they currently occupy. A stored range is
+  /// trusted only while it still delimits its token; otherwise the token is
+  /// relocated by scanning forward from the previous token's end, so duplicate
+  /// labels stay bound to their own occurrence.
+  void _anchorTokens(String text) {
+    var cursor = 0;
+
+    for (var index = 0; index < _inlineTokens.length; index++) {
+      final token = _inlineTokens[index];
+      final stored = token.start;
+      final fitsStored =
+          stored != null &&
+          stored >= cursor &&
+          stored + token.token.length <= text.length &&
+          text.startsWith(token.token, stored);
+      final start = fitsStored ? stored : text.indexOf(token.token, cursor);
+      if (start < 0) continue;
+      final end = start + token.token.length;
+      _inlineTokens[index] = token.withRange(start, end);
+      cursor = end;
+    }
+  }
+
+  int _countOccurrences(String text, String token) {
+    if (token.isEmpty) return 0;
+    var count = 0;
+    var searchFrom = 0;
+    while (true) {
+      final index = text.indexOf(token, searchFrom);
+      if (index < 0) break;
+      count++;
+      searchFrom = index + token.length;
+    }
+    return count;
   }
 
   // -- Lifecycle ------------------------------------------------------------
@@ -551,7 +713,7 @@ class FileTextFieldState extends State<FileTextField> {
   // Paste drops paths in as attachments; keys are intercepted only while a
   // suggestion menu is open, so ordinary typing stays with Nocterm's TextField.
 
-  /// Handles paste events: intercepts file paths and attaches them.
+  /// Handles paste events: intercepts file paths and collapses large pastes.
   bool _handlePaste(String pastedText) {
     final paths = _extractPaths(pastedText);
     if (paths.isNotEmpty) {
@@ -560,7 +722,48 @@ class FileTextFieldState extends State<FileTextField> {
       }
       return true; // Handled
     }
+
+    if (component.enablePasteCollapse) {
+      final collapse = _collapsiblePaste(pastedText);
+      if (collapse != null) {
+        _attachPastedText(collapse);
+        return true; // Handled
+      }
+    }
     return false; // Let TextField handle normal text paste
+  }
+
+  /// The text to collapse, or `null` when the paste is small enough to insert
+  /// verbatim. Counting and storage happen on the trimmed text, the token
+  /// already supplies its own separators. In single-line fields Nocterm
+  /// flattens newlines before the paste arrives, so only length applies there.
+  String? _collapsiblePaste(String pastedText) {
+    final trimmed = pastedText.trim();
+    if (trimmed.isEmpty) return null;
+    final lineCount = trimmed.split('\n').length;
+    if (lineCount >= component.pasteCollapseMinLines ||
+        trimmed.length >= component.pasteCollapseMinChars) {
+      return trimmed;
+    }
+    return null;
+  }
+
+  void _attachPastedText(String pastedText) {
+    setState(() {
+      final style = component.pasteStyle;
+      final lineCount = pastedText.split('\n').length;
+      final label = lineCount == 1 ? 'line' : 'lines';
+      final token =
+          '${style.openingDelimiter}Pasted ~$lineCount $label${style.closingDelimiter}';
+      _insertInlineToken(
+        _InlineToken(token: token, style: style, pastedText: pastedText),
+      );
+      _notifyPastedChanged();
+    });
+  }
+
+  void _notifyPastedChanged() {
+    component.onPastedChanged?.call(getPastedTexts());
   }
 
   /// Handles key events: intercepts `@` for file mention and Ctrl+V for paste.
@@ -891,10 +1094,15 @@ class FileTextFieldState extends State<FileTextField> {
   bool _removeAttachmentAtSelection({required bool backwards}) {
     final text = _controller.text;
     final selection = _controller.selection;
+
+    // Ranges are the source of truth: each token acts on the span it occupies,
+    // so two identical labels never resolve to the same occurrence.
+    _anchorTokens(text);
+
     for (final inlineToken in _inlineTokens.toList()) {
-      final tokenStart = text.indexOf(inlineToken.token);
-      if (tokenStart < 0) continue;
-      final tokenEnd = tokenStart + inlineToken.token.length;
+      if (inlineToken.start == null || inlineToken.end == null) continue;
+      final tokenStart = inlineToken.start!;
+      final tokenEnd = inlineToken.end!;
       final touchesToken = selection.isCollapsed
           ? backwards
                 ? selection.extentOffset > tokenStart &&
@@ -915,19 +1123,19 @@ class FileTextFieldState extends State<FileTextField> {
           offset: range.$1.clamp(0, newText.length),
         );
         if (file != null) _notifyFilesChanged();
+        if (inlineToken.isPasted) _notifyPastedChanged();
       });
       return true;
     }
     return false;
   }
 
-  /// Extracts file paths from pasted text: one per line, or several on a line
-  /// separated by spaces.
+  /// Extracts pasted file paths from [text].
   ///
-  /// A line is only split on spaces when *every* token ends in a file
-  /// extension, so a path that legitimately contains a space
-  /// (`/home/user/My Docs/a.txt`) stays whole instead of being torn into
-  /// fragments.
+  /// A line is a path only when every token on it is path-shaped — carries a
+  /// separator or ends in an extension — so prose that merely mentions a path
+  /// has bare words in it and is left for the collapsible-paste path instead
+  /// of being torn into attachments.
   List<String> _extractPaths(String text) {
     final paths = <String>[];
     for (final line in text.split('\n')) {
@@ -935,9 +1143,14 @@ class FileTextFieldState extends State<FileTextField> {
       if (trimmed.isEmpty) continue;
 
       final tokens = trimmed.split(RegExp(r'\s+'));
-      if (tokens.length > 1 && tokens.every((token) => _hasExtension(token))) {
+      if (tokens.isEmpty) continue;
+      if (!tokens.every(_isPathShaped)) continue;
+
+      // `a.png b.png` is a list of paths; a line whose tokens are shaped but
+      // only some carry an extension is one path that contains spaces.
+      if (tokens.length > 1 && tokens.every(_hasExtension)) {
         paths.addAll(tokens);
-      } else if (_looksLikePath(trimmed)) {
+      } else {
         paths.add(trimmed);
       }
     }
@@ -946,12 +1159,10 @@ class FileTextFieldState extends State<FileTextField> {
 
   bool _hasExtension(String path) => RegExp(r'\.[a-zA-Z0-9]+$').hasMatch(path);
 
-  bool _looksLikePath(String s) {
-    // Heuristic: contains path separator or looks like a file with extension
-    return s.contains('/') ||
-        s.contains('\\') ||
-        RegExp(r'\.[a-zA-Z0-9]+$').hasMatch(s);
-  }
+  /// A token belongs to a path when it carries a separator or a file
+  /// extension. Bare words (`and`, `the`, `supports`) never do.
+  bool _isPathShaped(String token) =>
+      token.contains('/') || token.contains('\\') || _hasExtension(token);
 
   // -- Rendering ------------------------------------------------------------
   // The field paints through Nocterm's public RichText so tokens can carry
@@ -981,7 +1192,9 @@ class FileTextFieldState extends State<FileTextField> {
       maxLength: component.maxLength,
       onChanged: null, // Handled via controller listener
       onEditingComplete: component.onEditingComplete,
-      onSubmitted: component.onSubmitted,
+      onSubmitted: component.onSubmitted == null
+          ? null
+          : (value) => component.onSubmitted!(getExpandedText()),
       onPaste: _handlePaste,
       onKeyEvent: _handleKeyEvent,
       enabled: component.enabled,

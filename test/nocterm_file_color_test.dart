@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:nocterm_file_color/nocterm_file_color.dart';
 import 'package:test/test.dart';
 import 'package:nocterm/nocterm.dart';
@@ -427,6 +429,127 @@ void main() {
     test('openLocation is a static method', () {
       // Verify the method exists as a static method
       expect(FileOpener.openLocation, isA<Function>());
+    });
+
+    test('SuggestionMenuStyle default equals another default', () async {
+      expect(const SuggestionMenuStyle(), const SuggestionMenuStyle());
+      expect(
+        const SuggestionMenuStyle().hashCode,
+        const SuggestionMenuStyle().hashCode,
+      );
+    });
+
+    test('SuggestionMenuStyle equality is field-wise', () async {
+      const base = SuggestionMenuStyle();
+      const other = SuggestionMenuStyle(
+        backgroundColor: Colors.red,
+        border: null,
+        selectedBackgroundColor: Colors.blue,
+        selectedTextColor: Colors.green,
+        itemTextColor: Colors.yellow,
+        descriptionColor: Colors.grey,
+        highlightMarker: '>',
+        highlightMarkerColor: Colors.magenta,
+        padding: EdgeInsets.zero,
+      );
+
+      expect(base, isNot(other));
+      expect(base == other, isFalse);
+      expect(base.hashCode == other.hashCode, isFalse);
+      expect(other, other);
+
+      // Each later field on its own, so equality walks the whole chain.
+      final perField = <String, SuggestionMenuStyle>{
+        'selectedBackgroundColor': base.copyWith(
+          selectedBackgroundColor: Colors.red,
+        ),
+        'selectedTextColor': base.copyWith(selectedTextColor: Colors.red),
+        'itemTextColor': base.copyWith(itemTextColor: Colors.red),
+        'descriptionColor': base.copyWith(descriptionColor: Colors.red),
+        'highlightMarker': base.copyWith(highlightMarker: '>'),
+        'highlightMarkerColor': base.copyWith(highlightMarkerColor: Colors.red),
+        'padding': base.copyWith(padding: EdgeInsets.zero),
+      };
+      perField.forEach((field, style) {
+        expect(base, isNot(style), reason: '$field takes part in equality');
+        expect(base.hashCode, isNot(style.hashCode), reason: '$field hashes');
+      });
+    });
+
+    test('SuggestionMenuStyle copyWith overrides single fields', () async {
+      const base = SuggestionMenuStyle();
+      final changed = base.copyWith(
+        backgroundColor: Colors.red,
+        highlightMarker: '>',
+      );
+
+      expect(changed.backgroundColor, Colors.red);
+      expect(changed.highlightMarker, '>');
+      expect(changed.selectedBackgroundColor, base.selectedBackgroundColor);
+      expect(changed.border, base.border);
+    });
+
+    test('SuggestionMenuStyle copyWith can drop the border', () async {
+      const base = SuggestionMenuStyle();
+      expect(base.copyWith(clearBorder: true).border, isNull);
+      // Passing a border explicitly still wins over the existing one.
+      final border = BoxBorder.all(color: Colors.red);
+      expect(base.copyWith(border: border).border, border);
+    });
+
+    test('FileOpener rejects an empty path', () {
+      expect(
+        () => FileOpener.buildLocationCommand(''),
+        throwsA(
+          isA<FileOpenerException>().having(
+            (error) => error.message,
+            'message',
+            'Cannot open an empty path.',
+          ),
+        ),
+      );
+    });
+
+    test('FileOpener rejects a path that does not exist', () {
+      expect(
+        () => FileOpener.buildLocationCommand('/no/such/file/at/all.txt'),
+        throwsA(
+          isA<FileOpenerException>()
+              .having(
+                (error) => error.message,
+                'message',
+                contains('does not exist'),
+              )
+              .having(
+                (error) => error.path,
+                'path',
+                '/no/such/file/at/all.txt',
+              ),
+        ),
+      );
+    });
+
+    test('FileOpener builds the platform command for an existing file', () {
+      final directory = Directory.systemTemp.createTempSync();
+      final file = File('${directory.path}/main.dart')..writeAsStringSync('//');
+      final command = FileOpener.buildLocationCommand(file.path);
+
+      if (Platform.isWindows) {
+        expect(command.first, 'explorer');
+      } else if (Platform.isMacOS) {
+        expect(command, ['open', '-R', file.path]);
+      } else {
+        expect(command, ['xdg-open', directory.path]);
+      }
+      directory.deleteSync(recursive: true);
+    });
+
+    test('FileOpenerException renders with and without a path', () {
+      const withPath = FileOpenerException('boom', path: '/tmp/x');
+      const without = FileOpenerException('boom');
+
+      expect('$withPath', 'FileOpenerException: boom (path: /tmp/x)');
+      expect('$without', 'FileOpenerException: boom');
     });
   });
 
@@ -2330,6 +2453,500 @@ void main() {
       },
     );
 
+    test('large multiline paste collapses into a pasted tag', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('paste collapse', (tester) async {
+        final lines = List.generate(5, (i) => 'line $i').join('\n');
+        ClipboardManager.copy(lines);
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 4,
+            maxLines: 10,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+
+        expect(controller.text, '[Pasted ~5 lines] ');
+        expect(key.currentState!.getPastedTexts(), hasLength(1));
+        expect(key.currentState!.getPastedTexts().single, lines);
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('small paste stays as plain text', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('small paste', (tester) async {
+        ClipboardManager.copy('hello world');
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+
+        expect(controller.text, 'hello world');
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('large single-line paste collapses by character count', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('char collapse', (tester) async {
+        ClipboardManager.copy('a' * 600);
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+
+        expect(controller.text, '[Pasted ~1 line] ');
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('deleting a pasted tag removes the whole chunk', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('delete pasted', (tester) async {
+        ClipboardManager.copy('a\nb\nc\nd');
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 4,
+            maxLines: 10,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+        expect(controller.text, '[Pasted ~4 lines] ');
+
+        await tester.sendBackspace();
+        await tester.pump();
+        expect(controller.text, '');
+        expect(key.currentState!.getPastedTexts(), hasLength(0));
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('onSubmitted receives expanded text', () async {
+      final controller = TextEditingController();
+      String? submitted;
+
+      await testNocterm('submit expanded', (tester) async {
+        ClipboardManager.copy('a\nb\nc\nd');
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 4,
+            maxLines: 10,
+            onSubmitted: (value) => submitted = value,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+        await tester.sendEnter();
+        await tester.pump();
+
+        expect(submitted, 'a\nb\nc\nd');
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('prose mentioning paths is not treated as attachments', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('prose paste', (tester) async {
+        ClipboardManager.copy(
+          '''
+Inline file attachments – paste a path or attach programmatically; [lib/main.dart] and [image 1] labels are colored in place; Backspace removes a token and detaches the file as one unit.
+Colored tokens – InlineToken entries paint @mentions, /commands, or any substring; styles support colors, bold, italic, underline, and square, custom, or no brackets around the label.
+Host-owned suggestion menus – the application supplies @ and / candidates (FileTextFieldSuggestion.file, .folder, .agent, .command); the field filters, selects, and inserts them.''',
+        );
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 10,
+            maxLines: 10,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+
+        expect(
+          key.currentState!.getAttachedFiles(),
+          hasLength(0),
+          reason: 'prose must not be attached as files',
+        );
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('identical pasted labels keep their own spans', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('duplicate pasted labels', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 6,
+            maxLines: 6,
+          ),
+        );
+        // Two identical 4-line pastes: both collapse to the same label text.
+        ClipboardManager.copy('a\nb\nc\nd');
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+        ClipboardManager.copy('e\nf\ng\nh');
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+
+        expect(controller.text, '[Pasted ~4 lines] [Pasted ~4 lines] ');
+        // Each label expands to its own chunk, not the first one twice.
+        expect(key.currentState!.getExpandedText(), 'a\nb\nc\nd e\nf\ng\nh');
+
+        // Backspace on the second label removes that span only.
+        controller.selection = TextSelection.collapsed(offset: 35);
+        await tester.pump();
+        await tester.sendBackspace();
+        await tester.pump();
+
+        expect(controller.text, '[Pasted ~4 lines] ');
+        expect(key.currentState!.getPastedTexts(), hasLength(1));
+        expect(key.currentState!.getPastedTexts().single, 'a\nb\nc\nd');
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('a path list on one line still attaches every path', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('path list', (tester) async {
+        ClipboardManager.copy('/tmp/a.txt /tmp/b.txt');
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+
+        expect(controller.text, '[a.txt] [b.txt] ');
+        expect(key.currentState!.getAttachedFiles(), hasLength(2));
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('deleting a pasted tag keeps the separator the user typed', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('keep typed separator', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 6,
+            maxLines: 6,
+          ),
+        );
+        controller.text = 'hi ';
+        controller.selection = TextSelection.collapsed(offset: 3);
+        await tester.pump();
+
+        ClipboardManager.copy('a\nb\nc\nd');
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+        // The tag brings its own trailing separator, so typing continues
+        // without extra spaces.
+        expect(controller.text, 'hi [Pasted ~4 lines] ');
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.keyX, character: 'x'),
+        );
+        await tester.pump();
+        expect(controller.text, 'hi [Pasted ~4 lines] x');
+
+        // Deleting the tag takes only the tag and its own separator: the
+        // space typed before it survives and `x` stays put.
+        controller.selection = TextSelection.collapsed(offset: 20);
+        await tester.pump();
+        await tester.sendBackspace();
+        await tester.pump();
+        expect(controller.text, 'hi x');
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('deleting a file tag keeps the separator the user typed', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('keep typed separator file', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+          ),
+        );
+        controller.text = 'hi ';
+        controller.selection = TextSelection.collapsed(offset: 3);
+        await tester.pump();
+
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+        await tester.pump();
+        expect(controller.text, 'hi [main.dart] ');
+
+        controller.selection = TextSelection.collapsed(offset: 15);
+        await tester.pump();
+        await tester.sendBackspace();
+        await tester.pump();
+        expect(controller.text, 'hi ');
+      });
+
+      controller.dispose();
+    });
+
+    test('paste collapse counts lines on the trimmed text', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('trimmed line count', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 6,
+            maxLines: 6,
+          ),
+        );
+        // A trailing newline must not add a line to the label.
+        ClipboardManager.copy('a\nb\nd\n');
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+
+        expect(controller.text, '[Pasted ~3 lines] ');
+        expect(key.currentState!.getPastedTexts(), hasLength(1));
+        expect(key.currentState!.getPastedTexts().single, 'a\nb\nd');
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('a long few-line paste collapses too', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('long few lines', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 6,
+            maxLines: 6,
+          ),
+        );
+        // Two very long lines: under the line threshold, over the char one.
+        ClipboardManager.copy('${'x' * 100}\n${'y' * 100}');
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+
+        expect(controller.text, '[Pasted ~2 lines] ');
+        expect(key.currentState!.getPastedTexts(), hasLength(1));
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('short two-line pastes stay as text', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('short few lines', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 6,
+            maxLines: 6,
+          ),
+        );
+        ClipboardManager.copy('a\nb');
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+
+        expect(controller.text, 'a\nb');
+        expect(key.currentState!.getPastedTexts(), hasLength(0));
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('collapsed paste stores the trimmed text', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('trimmed storage', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 6,
+            maxLines: 6,
+          ),
+        );
+        ClipboardManager.copy('  a\nb\nc  ');
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+
+        expect(controller.text, '[Pasted ~3 lines] ');
+        expect(key.currentState!.getPastedTexts().single, 'a\nb\nc');
+        expect(key.currentState!.getExpandedText(), 'a\nb\nc');
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
     test(
       'creates and disposes its own controller when none is given',
       () async {
@@ -2371,6 +2988,771 @@ void main() {
         // Backspace at the token also swallows the space that precedes it.
         expect(controller.text, 'x ');
         expect(key.currentState!.getAttachedFiles(), hasLength(0));
+      });
+
+      controller.dispose();
+    });
+
+    test('mouse wheel up moves the selection back', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('wheel up', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => List.generate(
+              10,
+              (i) => FileTextFieldSuggestion.command(
+                name: 'cmd$i',
+                style: const FileStyle(),
+              ),
+            ),
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+        await tester.pump();
+
+        await tester.sendMouseEvent(
+          const MouseEvent(
+            button: MouseButton.wheelDown,
+            x: 1,
+            y: 1,
+            pressed: true,
+          ),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 1);
+
+        await tester.sendMouseEvent(
+          const MouseEvent(
+            button: MouseButton.wheelUp,
+            x: 1,
+            y: 1,
+            pressed: true,
+          ),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 0);
+      });
+
+      controller.dispose();
+    });
+
+    test('a non-cyclic menu stops the wheel at the first row', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('wheel no cyclic', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            suggestionCyclicScroll: false,
+            onSuggestionsRequested: (trigger, query) => List.generate(
+              10,
+              (i) => FileTextFieldSuggestion.command(
+                name: 'cmd$i',
+                style: const FileStyle(),
+              ),
+            ),
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+        await tester.pump();
+
+        await tester.sendMouseEvent(
+          const MouseEvent(
+            button: MouseButton.wheelUp,
+            x: 1,
+            y: 1,
+            pressed: true,
+          ),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 0);
+
+        await tester.sendMouseEvent(
+          const MouseEvent(
+            button: MouseButton.wheelDown,
+            x: 1,
+            y: 1,
+            pressed: true,
+          ),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 1);
+      });
+
+      controller.dispose();
+    });
+
+    test('cyclic page keys wrap around the ends', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('cyclic page keys', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            suggestionPageSize: 3,
+            suggestionCyclicScroll: true,
+            onSuggestionsRequested: (trigger, query) => List.generate(
+              10,
+              (i) => FileTextFieldSuggestion.command(
+                name: 'cmd$i',
+                style: const FileStyle(),
+              ),
+            ),
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+        await tester.pump();
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.pageUp),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 7);
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.pageDown),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 0);
+      });
+
+      controller.dispose();
+    });
+
+    test('a row matched by searchText renders without a highlight', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('match by search text', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            // The file rows carry `searchText: '<name> file'`, so the query
+            // matches them without appearing in the label.
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+        for (final character in 'file'.split('')) {
+          await tester.sendKeyEvent(
+            KeyboardEvent(logicalKey: LogicalKey.keyE, character: character),
+          );
+        }
+        await tester.pump();
+
+        // All five file rows stay listed; no label contains the query.
+        expect(
+          tester.terminalState,
+          containsText('nocterm_file_color_example.dart'),
+        );
+        expect(tester.terminalState, isNot(containsText('file[main.dart]')));
+      });
+
+      controller.dispose();
+    });
+
+    test('the host reads the menu style from the state', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('state style', (tester) async {
+        const style = SuggestionMenuStyle(highlightMarker: '»');
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            suggestionMenuStyle: style,
+          ),
+        );
+
+        expect(key.currentState!.suggestionMenuStyle, style);
+      });
+
+      controller.dispose();
+    });
+
+    test(
+      'a non-cyclic menu stops moveSuggestionHighlight at the ends',
+      () async {
+        final controller = TextEditingController();
+        final key = GlobalKey<FileTextFieldState>();
+
+        await testNocterm('linear highlight move', (tester) async {
+          await tester.pumpComponent(
+            FileTextField(
+              key: key,
+              controller: controller,
+              focused: true,
+              width: 40,
+              height: 1,
+              suggestionCyclicScroll: false,
+              onSuggestionsRequested: (trigger, query) => List.generate(
+                3,
+                (i) => FileTextFieldSuggestion.command(
+                  name: 'cmd$i',
+                  style: const FileStyle(),
+                ),
+              ),
+            ),
+          );
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+          );
+          await tester.pump();
+
+          key.currentState!.moveSuggestionHighlight(-1);
+          await tester.pump();
+          expect(key.currentState!.selectedSuggestionIndex, 0);
+
+          key.currentState!.moveSuggestionHighlight(5);
+          await tester.pump();
+          expect(key.currentState!.selectedSuggestionIndex, 2);
+        });
+
+        controller.dispose();
+      },
+    );
+
+    test('the inline cursor blinks once a token is present', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('inline blink', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            cursorBlinkRate: const Duration(milliseconds: 50),
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+        await tester.pump();
+        controller.text = '[main.dart] ab';
+        // Caret on the plain text, where the cell has no background of its own.
+        controller.selection = TextSelection.collapsed(offset: 12);
+        await tester.pump();
+
+        Color? backgroundColor() =>
+            tester.terminalState.getCellAt(12, 0)?.style.backgroundColor;
+        expect(backgroundColor(), isNotNull);
+        await tester.pump(const Duration(milliseconds: 60));
+        expect(backgroundColor(), isNull);
+        await tester.pump(const Duration(milliseconds: 60));
+        expect(backgroundColor(), isNotNull);
+      });
+
+      controller.dispose();
+    });
+
+    test('swapping the controller keeps tokens in sync', () async {
+      final first = TextEditingController(text: '[main.dart] ab');
+      final second = TextEditingController(text: 'plain');
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('swap field controller', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: first,
+            focused: true,
+            width: 40,
+            height: 1,
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+        await tester.pump();
+        expect(key.currentState!.getAttachedFiles(), hasLength(1));
+
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: second,
+            focused: true,
+            width: 40,
+            height: 1,
+          ),
+        );
+        // The attachment follows the text it came with.
+        expect(key.currentState!.getAttachedFiles(), hasLength(0));
+        expect(second.text, 'plain');
+      });
+
+      first.dispose();
+      second.dispose();
+    });
+
+    test('pressing Enter with no matches closes the menu', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('enter with no matches', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => const [],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+        expect(tester.terminalState, containsText('No matches'));
+
+        await tester.sendEnter();
+        await tester.pump();
+
+        expect(key.currentState!.isSuggestionMenuOpen, isFalse);
+        expect(tester.terminalState, isNot(containsText('No matches')));
+      });
+
+      controller.dispose();
+    });
+
+    test('a submit without collapsed pastes passes the text through', () async {
+      final controller = TextEditingController();
+      String? submitted;
+
+      await testNocterm('submit passthrough', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 3,
+            maxLines: 3,
+            onSubmitted: (value) => submitted = value,
+          ),
+        );
+        controller.text = 'hello ';
+        await tester.pump();
+
+        await tester.sendEnter();
+        await tester.pump();
+
+        expect(submitted, 'hello ');
+      });
+
+      controller.dispose();
+    });
+
+    test('a submit with a collapsed paste drops the tag separator', () async {
+      final controller = TextEditingController();
+      String? submitted;
+
+      await testNocterm('submit collapses separator', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 3,
+            maxLines: 3,
+            onSubmitted: (value) => submitted = value,
+          ),
+        );
+        ClipboardManager.copy('a\nb\nc\n');
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+        expect(controller.text, '[Pasted ~3 lines] ');
+
+        await tester.sendEnter();
+        await tester.pump();
+
+        expect(submitted, 'a\nb\nc');
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('the char threshold pins >= exactly', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('char boundary', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 1,
+          ),
+        );
+        ClipboardManager.copy('a' * 149);
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+        expect(controller.text, 'a' * 149);
+
+        ClipboardManager.copy('a' * 150);
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+        // The 149-char paste from before stays in the field.
+        expect(controller.text, '${'a' * 149} [Pasted ~1 line] ');
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('disabling paste collapse inserts the paste verbatim', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('collapse disabled', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 8,
+            maxLines: 8,
+            enablePasteCollapse: false,
+          ),
+        );
+        ClipboardManager.copy('a\nb\nc\nd\ne\nf');
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+
+        expect(controller.text, 'a\nb\nc\nd\ne\nf');
+        expect(key.currentState!.getPastedTexts(), hasLength(0));
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('a selection over a token paints the selection color', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('selection highlight', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            selectionColor: Colors.red,
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+        await tester.pump();
+        controller.text = '[main.dart] ab';
+        controller.selection = const TextSelection(
+          baseOffset: 2,
+          extentOffset: 5,
+        );
+        await tester.pump();
+
+        for (final column in [2, 3, 4]) {
+          expect(
+            tester.terminalState.getCellAt(column, 0)?.style.backgroundColor,
+            Colors.red,
+            reason: 'column $column is inside the selection',
+          );
+        }
+        expect(
+          tester.terminalState.getCellAt(6, 0)?.style.backgroundColor,
+          isNot(Colors.red),
+        );
+      });
+
+      controller.dispose();
+    });
+
+    test('an underline cursor renders underlined cells', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('underline cursor', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            cursorStyle: CursorStyle.underline,
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+        await tester.pump();
+        controller.text = '[main.dart] ab';
+        controller.selection = TextSelection.collapsed(offset: 1);
+        await tester.pump();
+
+        expect(
+          tester.terminalState.getCellAt(1, 0)?.style.decoration,
+          TextDecoration.underline,
+        );
+        expect(
+          tester.terminalState.getCellAt(5, 0)?.style.decoration,
+          isNot(TextDecoration.underline),
+        );
+      });
+
+      controller.dispose();
+    });
+
+    test('expansion survives edits before the tag', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('expansion after edits', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 6,
+            maxLines: 6,
+          ),
+        );
+        ClipboardManager.copy('a\nb\nc\nd');
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+
+        // Typing before the tag drifts its stored range.
+        controller.text = 'AB[Pasted ~4 lines] x';
+        await tester.pump();
+
+        expect(key.currentState!.getExpandedText(), 'ABa\nb\nc\nd x');
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('expandPastedText puts the full text back in the field', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('public expand', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 6,
+            maxLines: 6,
+          ),
+        );
+        ClipboardManager.copy('a\nb\nc\nd');
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+        expect(controller.text, '[Pasted ~4 lines] ');
+
+        key.currentState!.expandPastedText();
+        await tester.pump();
+
+        expect(controller.text, 'a\nb\nc\nd');
+        expect(key.currentState!.getPastedTexts(), hasLength(0));
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('moveSuggestionHighlight drives the menu for hosts', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('host highlight move', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: _mockSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 0);
+
+        key.currentState!.moveSuggestionHighlight(1);
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 1);
+
+        key.currentState!.moveSuggestionHighlight(-1);
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 0);
+      });
+
+      controller.dispose();
+    });
+
+    test('a range selection deletes the token it covers', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('range selection delete', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 1,
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+        await tester.pump();
+        controller.text = 'hi [main.dart] ab';
+        controller.selection = const TextSelection(
+          baseOffset: 1,
+          extentOffset: 8,
+        );
+        await tester.pump();
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.backspace),
+        );
+        await tester.pump();
+
+        expect(controller.text, 'hi ab');
+        expect(key.currentState!.getAttachedFiles(), hasLength(0));
+      });
+
+      controller.dispose();
+    });
+
+    test(
+      'a token without its trailing separator falls back to the leading one',
+      () async {
+        final controller = TextEditingController();
+        final key = GlobalKey<FileTextFieldState>();
+
+        await testNocterm('leading separator fallback', (tester) async {
+          await tester.pumpComponent(
+            FileTextField(
+              key: key,
+              controller: controller,
+              focused: true,
+              width: 60,
+              height: 1,
+            ),
+          );
+          key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+          await tester.pump();
+          // The user removed the separator the tag brought with it.
+          controller.text = 'hi [main.dart]';
+          controller.selection = TextSelection.collapsed(offset: 15);
+          await tester.pump();
+
+          await tester.sendBackspace();
+          await tester.pump();
+
+          expect(controller.text, 'hi');
+        });
+
+        controller.dispose();
+      },
+    );
+
+    test('a wide grapheme shifts the hit test for token taps', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+      FileInfo? tapped;
+
+      await testNocterm('wide grapheme tap', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: false,
+            width: 60,
+            height: 1,
+            onFileClick: (file) => tapped = file,
+          ),
+        );
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+        await tester.pump();
+        controller.text = '你[main.dart]';
+        controller.selection = TextSelection.collapsed(offset: 13);
+        await tester.pump();
+
+        // 你 occupies columns 0-1, so column 4 lands inside the token body.
+        await tester.press(4, 0);
+        await tester.release(4, 0);
+
+        expect(tapped, isNotNull);
+        expect(tapped!.name, 'main.dart');
       });
 
       controller.dispose();
@@ -2421,7 +3803,9 @@ void main() {
         style: FileStyle(text: Colors.red),
       );
       expect(a, equals(b));
+      expect(a.hashCode, b.hashCode);
       expect(a, isNot(equals(c)));
+      expect(a.hashCode, isNot(c.hashCode));
     });
   });
 
@@ -2752,6 +4136,106 @@ void main() {
         await tester.sendEnter();
 
         expect(submitted, 'hello');
+      });
+
+      controller.dispose();
+    });
+
+    test(
+      'creates and disposes its own controller when none is given',
+      () async {
+        await testNocterm('owned token controller', (tester) async {
+          await tester.pumpComponent(
+            const TokenHighlightTextField(
+              focused: true,
+              width: 40,
+              height: 1,
+              tokens: [InlineToken(token: '@x', style: FileStyle())],
+            ),
+          );
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+          );
+          expect(tester.terminalState, containsText('@'));
+
+          // Unmounting runs the owned-controller dispose path.
+          await tester.pumpComponent(const SizedBox());
+        });
+      },
+    );
+
+    test('swapping the controller repaints the overlay', () async {
+      final first = TextEditingController(text: '@x');
+      final second = TextEditingController(text: 'yy');
+
+      await testNocterm('swap token controller', (tester) async {
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: first,
+            focused: true,
+            width: 40,
+            height: 1,
+            tokens: const [
+              InlineToken(
+                token: '@x',
+                style: FileStyle(text: Colors.brightCyan),
+              ),
+            ],
+          ),
+        );
+        expect(tester.terminalState, containsText('@x'));
+        expect(
+          tester.terminalState.getCellAt(1, 0)?.style.color,
+          Colors.brightCyan,
+        );
+
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: second,
+            focused: true,
+            width: 40,
+            height: 1,
+            tokens: const [InlineToken(token: '@x', style: FileStyle())],
+          ),
+        );
+        expect(tester.terminalState, containsText('yy'));
+        expect(tester.terminalState, isNot(containsText('@x')));
+      });
+
+      first.dispose();
+      second.dispose();
+    });
+
+    test('the emulated cursor blinks at the configured rate', () async {
+      final controller = TextEditingController(text: '@x');
+      controller.selection = const TextSelection.collapsed(offset: 1);
+
+      await testNocterm('blinking token cursor', (tester) async {
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            cursorBlinkRate: const Duration(milliseconds: 50),
+            tokens: const [
+              InlineToken(
+                token: '@x',
+                style: FileStyle(text: Colors.brightCyan),
+              ),
+            ],
+          ),
+        );
+        await tester.pump();
+
+        // Starts visible, toggles off after one period, on again after two.
+        Color? backgroundColor() =>
+            tester.terminalState.getCellAt(1, 0)?.style.backgroundColor;
+        expect(backgroundColor(), isNotNull);
+        await tester.pump(const Duration(milliseconds: 60));
+        expect(backgroundColor(), isNull);
+        await tester.pump(const Duration(milliseconds: 60));
+        expect(backgroundColor(), isNotNull);
       });
 
       controller.dispose();
