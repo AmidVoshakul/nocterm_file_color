@@ -6,8 +6,8 @@ issue_tracker: https://github.com/AmidVoshakul/nocterm_file_color/issues
 homepage: https://github.com/AmidVoshakul/nocterm_file_color
 documentation: https://pub.dev/documentation/nocterm_file_color/latest/nocterm_file_color
 screenshots:
-  - description: A composer prompt with colored inline tokens
-  - path: screenshots/input.png
+  - description: "A composer prompt with colored inline tokens"
+    path: screenshots/input.png
 topics:
   - tui
   - terminal
