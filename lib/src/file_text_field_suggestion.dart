@@ -7,7 +7,7 @@ import 'file_info.dart';
 ///
 /// The category describes how the selected item is represented. It does not
 /// imply that the package executes agents or commands.
-enum FileTextFieldSuggestionKind { file, folder, agent, command }
+enum FileTextFieldSuggestionKind { file, folder, agent, command, session }
 
 /// An item supplied by the host application for the `@` or `/` suggestion menu.
 ///
@@ -15,12 +15,90 @@ enum FileTextFieldSuggestionKind { file, folder, agent, command }
 /// Folders, agents, and commands are inserted as colored tokens and remain the
 /// host application's responsibility.
 class FileTextFieldSuggestion {
+  /// Creates a file suggestion. Selecting it attaches [file].
+  ///
+  /// [style] colors the inserted token; pass `config.styleFor(file)` from a
+  /// `FileConfig` to reuse your application's file palette.
+  factory FileTextFieldSuggestion.file(
+    FileInfo file, {
+    required FileStyle style,
+    String? searchText,
+    String? path,
+  }) {
+    return FileTextFieldSuggestion._(
+      kind: FileTextFieldSuggestionKind.file,
+      name: file.name,
+      style: style,
+      searchText: searchText ?? '${file.name} ${file.path}',
+      file: file,
+      prefix: null,
+      path: path,
+    );
+  }
+
+  /// Creates a folder suggestion. [name] should include its trailing `/`.
+  ///
+  /// [style] defaults to [defaultFolderStyle].
+  const FileTextFieldSuggestion.folder({
+    required this.name,
+    FileStyle? style,
+    this.searchText,
+    this.prefix,
+    this.path,
+  }) : kind = FileTextFieldSuggestionKind.folder,
+       style = style ?? defaultFolderStyle,
+       file = null;
+
+  /// Creates an agent suggestion. [name] omits the leading `@`.
+  ///
+  /// [style] defaults to [defaultAgentStyle].
+  /// [prefix] allows customizing the inserted token prefix, e.g. '@', 'AI:', ''.
+  /// When null, defaults to '@'.
+  const FileTextFieldSuggestion.agent({
+    required this.name,
+    FileStyle? style,
+    this.searchText,
+    this.prefix,
+    this.path,
+  }) : kind = FileTextFieldSuggestionKind.agent,
+       style = style ?? defaultAgentStyle,
+       file = null;
+
+  /// Creates a slash-command suggestion. [name] omits the leading `/`.
+  ///
+  /// [style] defaults to [defaultCommandStyle].
+  const FileTextFieldSuggestion.command({
+    required this.name,
+    FileStyle? style,
+    this.searchText,
+    this.path,
+  }) : kind = FileTextFieldSuggestionKind.command,
+       style = style ?? defaultCommandStyle,
+       file = null,
+       prefix = null;
+
+  /// Creates a session suggestion. [name] is the session identifier.
+  ///
+  /// [style] defaults to [defaultSessionStyle].
+  /// [prefix] allows customizing the inserted token prefix, e.g. '@', '@session ', ''.
+  /// When null, defaults to '@session '.
+  const FileTextFieldSuggestion.session({
+    required this.name,
+    this.prefix,
+    FileStyle? style,
+    this.searchText,
+    this.path,
+  }) : kind = FileTextFieldSuggestionKind.session,
+       style = style ?? defaultSessionStyle,
+       file = null;
   const FileTextFieldSuggestion._({
     required this.kind,
     required this.name,
     required this.style,
     this.searchText,
     this.file,
+    this.prefix,
+    this.path,
   });
 
   /// Fallback token colors for suggestions that pass no [style].
@@ -43,56 +121,10 @@ class FileTextFieldSuggestion {
     background: Colors.magenta,
   );
 
-  /// Creates a file suggestion. Selecting it attaches [file].
-  ///
-  /// [style] colors the inserted token; pass `config.styleFor(file)` from a
-  /// `FileConfig` to reuse your application's file palette.
-  factory FileTextFieldSuggestion.file(
-    FileInfo file, {
-    required FileStyle style,
-    String? searchText,
-  }) {
-    return FileTextFieldSuggestion._(
-      kind: FileTextFieldSuggestionKind.file,
-      name: file.name,
-      style: style,
-      searchText: searchText ?? '${file.name} ${file.path}',
-      file: file,
-    );
-  }
-
-  /// Creates a folder suggestion. [name] should include its trailing `/`.
-  ///
-  /// [style] defaults to [defaultFolderStyle].
-  const FileTextFieldSuggestion.folder({
-    required this.name,
-    FileStyle? style,
-    this.searchText,
-  }) : kind = FileTextFieldSuggestionKind.folder,
-       style = style ?? defaultFolderStyle,
-       file = null;
-
-  /// Creates an agent suggestion. [name] omits the leading `@`.
-  ///
-  /// [style] defaults to [defaultAgentStyle].
-  const FileTextFieldSuggestion.agent({
-    required this.name,
-    FileStyle? style,
-    this.searchText,
-  }) : kind = FileTextFieldSuggestionKind.agent,
-       style = style ?? defaultAgentStyle,
-       file = null;
-
-  /// Creates a slash-command suggestion. [name] omits the leading `/`.
-  ///
-  /// [style] defaults to [defaultCommandStyle].
-  const FileTextFieldSuggestion.command({
-    required this.name,
-    FileStyle? style,
-    this.searchText,
-  }) : kind = FileTextFieldSuggestionKind.command,
-       style = style ?? defaultCommandStyle,
-       file = null;
+  static const FileStyle defaultSessionStyle = FileStyle(
+    text: Colors.black,
+    background: Colors.green,
+  );
 
   /// Category of the suggestion.
   final FileTextFieldSuggestionKind kind;
@@ -112,13 +144,26 @@ class FileTextFieldSuggestion {
   /// Present only for file suggestions.
   final FileInfo? file;
 
+  /// Optional prefix for the inserted token, used for session suggestions.
+  /// When null, a default prefix for the kind is used.
+  final String? prefix;
+
+  /// Optional path for navigation, used to identify folder hierarchy.
+  final String? path;
+
   /// Text shown in the menu.
-  String get displayLabel => switch (kind) {
-    FileTextFieldSuggestionKind.file => name,
-    FileTextFieldSuggestionKind.folder => name,
-    FileTextFieldSuggestionKind.agent => '@$name',
-    FileTextFieldSuggestionKind.command => '/$name',
-  };
+  String get displayLabel {
+    if (prefix != null) {
+      return '$prefix$name';
+    }
+    return switch (kind) {
+      FileTextFieldSuggestionKind.file => name,
+      FileTextFieldSuggestionKind.folder => name,
+      FileTextFieldSuggestionKind.agent => '@$name',
+      FileTextFieldSuggestionKind.command => '/$name',
+      FileTextFieldSuggestionKind.session => '@session $name',
+    };
+  }
 
   /// Text used by the package's case-insensitive query filter.
   String get searchableText =>

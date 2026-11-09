@@ -41,14 +41,14 @@ class ComposerDemo extends StatefulComponent {
 class _ComposerDemoState extends State<ComposerDemo> {
   // -- Palette --
 
-  static final _windowColor = Color.fromRGB(3, 3, 4);
-  static final _menuColor = Color.fromRGB(24, 24, 27);
-  static final _promptColor = Color.fromRGB(25, 26, 27);
-  static final _hoverColor = Color.fromRGB(46, 46, 52);
-  static final _borderColor = Color.fromRGB(46, 46, 50);
-  static final _dimColor = Color.fromRGB(98, 104, 117);
-  static final _textColor = Color.fromRGB(200, 200, 204);
-  static final _variantColor = Color.fromRGB(230, 199, 106);
+  static final _windowColor = const Color.fromRGB(3, 3, 4);
+  static final _menuColor = const Color.fromRGB(24, 24, 27);
+  static final _promptColor = const Color.fromRGB(25, 26, 27);
+  static final _hoverColor = const Color.fromRGB(46, 46, 52);
+  static final _borderColor = const Color.fromRGB(46, 46, 50);
+  static final _dimColor = const Color.fromRGB(98, 104, 117);
+  static final _textColor = const Color.fromRGB(200, 200, 204);
+  static final _variantColor = const Color.fromRGB(230, 199, 106);
 
   // -- Input --
 
@@ -134,38 +134,74 @@ class _ComposerDemoState extends State<ComposerDemo> {
         FileTextFieldSuggestion.command(name: 'model', style: commandStyle),
       ]);
     } else {
-      for (final path in const [
-        'example/nocterm_file_color_example.dart',
-        'lib/src/file_text_field.dart',
-        'README.md',
-        'CHANGELOG.md',
-        'lib/src/file_info.dart',
-      ]) {
-        final file = FileInfo.fromPath(path);
-        suggestions.add(
-          FileTextFieldSuggestion.file(
-            file,
-            style: config.styleFor(file),
-            searchText: '${file.name} file',
-          ),
-        );
-      }
+      try {
+        final state = _fieldKey.currentState;
+        final basePath = state?.currentBasePath;
+        final root = Directory.current;
+        final targetDir = basePath == null || basePath.isEmpty
+            ? root
+            : Directory('${root.path}${Platform.pathSeparator}$basePath');
+        if (!targetDir.existsSync()) return suggestions;
+        const folderStyle = FileStyle(background: Colors.yellow, bold: true);
+        for (final entity in targetDir.listSync(recursive: false)) {
+          final relPath = entity.path
+              .replaceFirst(root.path + Platform.pathSeparator, '')
+              .replaceAll(Platform.pathSeparator, '/');
+          final baseName = entity.path.split(Platform.pathSeparator).last;
+          if (entity is Directory) {
+            suggestions.add(
+              FileTextFieldSuggestion.folder(
+                name: '$baseName/',
+                style: folderStyle,
+                path: relPath,
+                searchText: '$baseName folder',
+              ),
+            );
+          } else if (entity is File) {
+            final fileInfo = FileInfo.fromPath(relPath);
+            suggestions.add(
+              FileTextFieldSuggestion.file(
+                fileInfo,
+                style: config.styleFor(fileInfo),
+                searchText: '${fileInfo.name} file',
+                path: relPath,
+              ),
+            );
+          }
+        }
+      } catch (_) {}
 
-      const folderStyle = FileStyle(background: Colors.yellow, bold: true);
       const agentStyle = FileStyle(
         background: Colors.cyan,
         bold: true,
         openingDelimiter: '',
         closingDelimiter: '',
       );
+      const sessionStyle = FileStyle(
+        text: Colors.black,
+        background: Colors.magenta,
+        bold: true,
+        openingDelimiter: '',
+        closingDelimiter: '',
+      );
       suggestions.addAll(const [
-        FileTextFieldSuggestion.folder(name: 'example/', style: folderStyle),
-        FileTextFieldSuggestion.folder(name: 'lib/', style: folderStyle),
-        FileTextFieldSuggestion.folder(name: 'test/', style: folderStyle),
         FileTextFieldSuggestion.agent(name: 'explore', style: agentStyle),
         FileTextFieldSuggestion.agent(name: 'general', style: agentStyle),
         FileTextFieldSuggestion.agent(name: 'code-reviewer', style: agentStyle),
-        FileTextFieldSuggestion.agent(name: 'debugger', style: agentStyle),
+        FileTextFieldSuggestion.session(
+          name: 'ses_kd4fk_kiu34_kj82jkahf3k2',
+          style: sessionStyle,
+        ),
+        FileTextFieldSuggestion.session(
+          name: 'ses_du43i_8duw8_87dsdsvd7sdd',
+          style: sessionStyle,
+          prefix: '@',
+        ),
+        FileTextFieldSuggestion.session(
+          name: 'ses_hydsk_ie8ed_8hfd7wwk2ll2',
+          style: sessionStyle,
+          prefix: '',
+        ),
       ]);
     }
 
@@ -179,11 +215,38 @@ class _ComposerDemoState extends State<ComposerDemo> {
   // Rendered as its own panel above the prompt instead of inside the field, so
   // the prompt keeps its bar. [FileTextFieldState] supplies the rows, the
   // highlighted index and programmatic selection.
+  /// Heading of the section that starts at [flatIndex], or `null` when the
+  /// row starts none.
+  String? headingBefore(FileTextFieldState? state, int flatIndex) {
+    if (state == null) return null;
+    var index = 0;
+    for (final group in state.visibleSuggestionGroups) {
+      final title = group.title;
+      if (title == null) {
+        index += group.items.length;
+        continue;
+      }
+      if (index == flatIndex) return title;
+      index += group.items.length;
+    }
+    return null;
+  }
+
+  /// Breadcrumb of the directory the `@` menu is browsing, or `null` at the
+  /// root. RightArrow drops into the highlighted folder, LeftArrow leaves it.
+  String? _breadcrumb(FileTextFieldState? state) {
+    if (state == null || !state.canNavigateBack) return null;
+    final basePath = state.currentBasePath;
+    if (basePath == null) return null;
+    return '$basePath · ← back';
+  }
+
   Component _buildMenuPanel() {
     final state = _fieldKey.currentState;
     final suggestions = state?.visibleSuggestions ?? const [];
     final selectedIndex = state?.selectedSuggestionIndex ?? -1;
     if (suggestions.isEmpty) return const SizedBox.shrink();
+    final breadcrumb = _breadcrumb(state);
 
     final pageSize = state?.suggestionPageSize ?? 8;
     final offset = (state?.suggestionScrollOffset ?? 0).clamp(
@@ -215,7 +278,12 @@ class _ComposerDemoState extends State<ComposerDemo> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            for (var i = 0; i < visible.length; i++)
+            if (breadcrumb != null)
+              Text(breadcrumb, style: TextStyle(color: _dimColor)),
+            for (var i = 0; i < visible.length; i++) ...[
+              // Section heading, drawn by the demo rather than the package.
+              if (headingBefore(state, offset + i) case final heading?)
+                Text(heading, style: TextStyle(color: _dimColor)),
               _buildMenuRow(
                 offset + i,
                 visible[i],
@@ -223,6 +291,7 @@ class _ComposerDemoState extends State<ComposerDemo> {
                     offset + i == selectedIndex ||
                     offset + i == _menuHoverIndex,
               ),
+            ],
           ],
         ),
       ),
@@ -245,9 +314,9 @@ class _ComposerDemoState extends State<ComposerDemo> {
           padding: const EdgeInsets.symmetric(horizontal: 1),
           child: Row(
             children: [
-              // Left third: the name.
+              // Left: display label — up to 2 lines, then ellipsis. Wider column.
               Expanded(
-                flex: 1,
+                flex: 2,
                 child: Text(
                   suggestion.displayLabel,
                   style: const TextStyle(color: Colors.white),
@@ -255,16 +324,14 @@ class _ComposerDemoState extends State<ComposerDemo> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              // Right two thirds: the kind. Same 1:2 split as chatorai's
-              // palette rows; capped to one row each so a long name can never
-              // bleed onto the description column.
+              // Right: kind name — single line, no ellipsis, overflow visible.
               Expanded(
                 flex: 2,
                 child: Text(
                   suggestion.kind.name,
                   style: TextStyle(color: _dimColor),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2,
+                  overflow: TextOverflow.visible,
                 ),
               ),
             ],
@@ -321,10 +388,11 @@ class _ComposerDemoState extends State<ComposerDemo> {
               controller: _controller,
               focused: true,
               maxLines: 25,
-              placeholder: 'Type a message with @agent or /command…',
+              placeholder:
+                  'Type a message with @ agent, files or sessions, / commands…',
               cursorColor: _agentColor,
               style: TextStyle(color: _textColor),
-              cursorBlinkRate: Duration(milliseconds: 500),
+              cursorBlinkRate: const Duration(milliseconds: 500),
               onSuggestionsRequested: _provideSuggestions,
               // The menu is drawn above the prompt by [_buildMenuPanel], so
               // the widget's own in-place menu is switched off here.

@@ -139,19 +139,13 @@ TextStyle _cursorTextStyle(
 ) {
   if (cursorStyle == CursorStyle.underline) {
     return TextStyle(
-      color: style.color,
+      color: style.color ?? Colors.white,
       backgroundColor: style.backgroundColor,
       fontWeight: style.fontWeight,
       decoration: TextDecoration.underline,
     );
   }
-  if (cursorStyle == CursorStyle.blockOutline) {
-    return TextStyle(
-      color: style.color,
-      backgroundColor: style.backgroundColor,
-      fontWeight: style.fontWeight,
-      decoration: TextDecoration.underline,
-    );
-  }
+  // Block and block-outline cursors match Nocterm's own field cursor: dark
+  // glyph over the caret color.
   return TextStyle(color: Colors.black, backgroundColor: cursorColor);
 }

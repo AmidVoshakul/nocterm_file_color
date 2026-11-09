@@ -1,9 +1,8 @@
-import 'dart:async';
-
 import 'package:nocterm/nocterm.dart';
 
 import 'inline_token.dart';
 import 'token_spans.dart';
+import 'cursor_blink_mixin.dart';
 
 /// A [TextField] wrapper that colors arbitrary inline tokens.
 ///
@@ -107,13 +106,10 @@ class TokenHighlightTextField extends StatefulComponent {
       _TokenHighlightTextFieldState();
 }
 
-class _TokenHighlightTextFieldState extends State<TokenHighlightTextField> {
+class _TokenHighlightTextFieldState extends State<TokenHighlightTextField>
+    with CursorBlinkMixin<TokenHighlightTextField> {
   late TextEditingController _controller;
   bool _controllerIsInternal = false;
-  Timer? _cursorBlinkTimer;
-  bool _cursorBlinkActive = false;
-  Duration? _cursorBlinkRate;
-  bool _cursorVisible = true;
 
   @override
   void initState() {
@@ -132,7 +128,6 @@ class _TokenHighlightTextFieldState extends State<TokenHighlightTextField> {
 
   @override
   void dispose() {
-    _cursorBlinkTimer?.cancel();
     _controller.removeListener(_handleControllerChanged);
     if (_controllerIsInternal) {
       _controller.dispose();
@@ -165,25 +160,13 @@ class _TokenHighlightTextFieldState extends State<TokenHighlightTextField> {
   void _syncCursorBlink() {
     final showInlineTokens =
         component.tokens.isNotEmpty && !component.obscureText;
-    final want = showInlineTokens && component.focused && component.showCursor;
-    if (want == _cursorBlinkActive &&
-        component.cursorBlinkRate == _cursorBlinkRate) {
-      return;
-    }
-    _cursorBlinkActive = want;
-    _cursorBlinkRate = component.cursorBlinkRate;
-    _cursorBlinkTimer?.cancel();
-    _cursorBlinkTimer = null;
-    if (want) {
-      _cursorVisible = true;
-      if (component.cursorBlinkRate != null) {
-        _cursorBlinkTimer = Timer.periodic(component.cursorBlinkRate!, (_) {
-          if (mounted) setState(() => _cursorVisible = !_cursorVisible);
-        });
-      }
-    } else {
-      _cursorVisible = false;
-    }
+    syncCursorBlink(
+      hasTokens: showInlineTokens,
+      obscureText: component.obscureText,
+      focused: component.focused,
+      showCursor: component.showCursor,
+      cursorBlinkRate: component.cursorBlinkRate,
+    );
   }
 
   @override
@@ -231,7 +214,7 @@ class _TokenHighlightTextFieldState extends State<TokenHighlightTextField> {
       final selectionColor =
           component.selectionColor ?? cursorColor.withOpacity(0.4);
       final cursorOffset =
-          component.focused && component.showCursor && _cursorVisible
+          component.focused && component.showCursor && cursorVisible
           ? selection.extentOffset.clamp(0, text.length)
           : null;
 

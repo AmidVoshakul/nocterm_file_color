@@ -35,13 +35,23 @@ class FileOpener {
     if (path.isEmpty) {
       throw const FileOpenerException('Cannot open an empty path.');
     }
-    final file = File(path);
+    // Basic sanitization: reject control characters and null bytes
+    if (path.contains('\u0000') || RegExp(r'[\r\n]').hasMatch(path)) {
+      throw FileOpenerException('Path contains invalid characters', path: path);
+    }
+    final normalized = path.trim();
+    final file = File(normalized);
     if (!file.existsSync()) {
-      throw FileOpenerException('File does not exist: $path', path: path);
+      throw FileOpenerException(
+        'File does not exist: $normalized',
+        path: normalized,
+      );
     }
 
     if (Platform.isWindows) {
-      return ['explorer', '/select,${file.path}'];
+      // Quoted: a comma or space in the path would otherwise end the
+      // /select argument early.
+      return ['explorer', '/select,"${file.path}"'];
     }
     if (Platform.isMacOS) {
       return ['open', '-R', file.path];
@@ -56,11 +66,20 @@ class FileOpener {
   /// path is missing or the OS command cannot be started.
   static Future<void> openLocation(String path) async {
     final command = buildLocationCommand(path);
+    final ProcessResult result;
     try {
-      await Process.run(command.first, command.sublist(1));
+      result = await Process.run(command.first, command.sublist(1));
     } on ProcessException catch (error) {
       throw FileOpenerException(
         'Could not run "${command.first}" to open "$path": ${error.message}',
+        path: path,
+      );
+    }
+    // Some managers (xdg-open with no file manager installed) report failure
+    // through the exit code instead of an exception.
+    if (result.exitCode != 0) {
+      throw FileOpenerException(
+        '"${command.first}" exited with ${result.exitCode} opening "$path"',
         path: path,
       );
     }

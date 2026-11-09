@@ -13,5 +13,6 @@ pubspec.lock
 
 # Build artifacts produced by `flutter test` / `flutter build`.
 build/
-
+.codegraph/
+.opencode/
 coverage/

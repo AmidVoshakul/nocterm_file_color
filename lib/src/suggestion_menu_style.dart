@@ -8,15 +8,6 @@ import 'package:nocterm/nocterm.dart';
 /// menu without a border, or build a [BoxBorder] with only the sides you want
 /// (left, right, top, bottom, or any combination).
 class SuggestionMenuStyle {
-  /// Default border: a gray box on all four sides (matches the previous
-  /// built-in menu appearance).
-  static const BoxBorder defaultBorder = BoxBorder(
-    top: BorderSide(color: Colors.gray),
-    right: BorderSide(color: Colors.gray),
-    bottom: BorderSide(color: Colors.gray),
-    left: BorderSide(color: Colors.gray),
-  );
-
   const SuggestionMenuStyle({
     this.backgroundColor,
     this.border = defaultBorder,
@@ -26,8 +17,19 @@ class SuggestionMenuStyle {
     this.descriptionColor,
     this.highlightMarker = '',
     this.highlightMarkerColor,
+    this.groupHeaderTextColor,
+    this.groupHeaderBackgroundColor,
     this.padding = const EdgeInsets.symmetric(vertical: 1),
   });
+
+  /// Default border: a gray box on all four sides (matches the previous
+  /// built-in menu appearance).
+  static const BoxBorder defaultBorder = BoxBorder(
+    top: BorderSide(color: Colors.gray),
+    right: BorderSide(color: Colors.gray),
+    bottom: BorderSide(color: Colors.gray),
+    left: BorderSide(color: Colors.gray),
+  );
 
   /// Background color of the menu panel. `null` keeps the terminal default.
   final Color? backgroundColor;
@@ -55,6 +57,12 @@ class SuggestionMenuStyle {
   /// Color of [highlightMarker]. Defaults to [selectedTextColor].
   final Color? highlightMarkerColor;
 
+  /// Text color of a section heading. `null` falls back to gray.
+  final Color? groupHeaderTextColor;
+
+  /// Background color of a section heading. `null` keeps the menu background.
+  final Color? groupHeaderBackgroundColor;
+
   /// Inner padding of the menu panel. `EdgeInsets.zero` removes padding.
   final EdgeInsets padding;
 
@@ -68,6 +76,8 @@ class SuggestionMenuStyle {
     Color? descriptionColor,
     String? highlightMarker,
     Color? highlightMarkerColor,
+    Color? groupHeaderTextColor,
+    Color? groupHeaderBackgroundColor,
     EdgeInsets? padding,
   }) {
     return SuggestionMenuStyle(

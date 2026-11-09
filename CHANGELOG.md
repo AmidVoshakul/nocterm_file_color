@@ -1,3 +1,28 @@
+## 0.0.5
+
+### Features
+- Added new suggestion kind `FileTextFieldSuggestionKind.session` with factory `FileTextFieldSuggestion.session`.
+- Sessions are inserted as a colored inline token `@session <name>` and can be selected from the `@`/`/` menu.
+- Session prefix is configurable via `prefix` parameter, allowing `@session <name>`, `@<name>` or plain `<name>` with custom colors and delimiters via `FileStyle`.
+- **Sectioned suggestion menu**: `SuggestionMenuGrouping` (and `SuggestionMenuGroup`) order, rename and merge the sections — the package hardcodes no layout. `Files & folders`, `Agents`, `Sessions`, `Commands` by default; the file/folder section drops its heading while browsing a directory, where the breadcrumb already carries it. Headings draw only when more than one section is present. Host-rendered menus get `visibleSuggestionGroups` and `suggestionGroupStartsAt` to interleave the same headings, and `SuggestionMenuStyle.groupHeaderTextColor` / `.groupHeaderBackgroundColor` color them.
+- **Folder navigation in the suggestion menu**: `path` on a suggestion marks it as a tree node, `RightArrow` drops into the highlighted folder and `LeftArrow` leaves it. The caret stays put while the menu is open. Breadcrumb and state are available through `navigationDepth`, `canNavigateBack` and `currentBasePath`; the demo scans its working directory and shows a breadcrumb.
+
+### Fixes
+- Inline token tap now uses anchored `start/end`, correctly handling duplicate labels.
+- Entering a folder now clears the typed query from the field, so a pick inside the folder inserts just the token.
+- Typing `@` or `/` in the middle of text no longer eats the character after the caret, and a range selection is replaced by the trigger exactly as typing would — both inherited from 0.0.4.
+- The menu query now honors `maxLength`; previously the query and inserted tokens bypassed it.
+- `FileOpener`: the Windows command quotes the path (a comma ended it early), and a non-zero exit code now raises instead of silently doing nothing.
+- The directory-child filter matches on a path boundary, so a sibling such as `library.txt` is no longer listed as a child of `lib`.
+- Removed the duplicated arrow-key handler in the suggestion menu.
+- `getExpandedText` is now pure — does not mutate state or call `_anchorTokens`.
+- Emulated cursors match Nocterm's own field cursor: block and block-outline are dark glyphs over the caret color, underline falls back to white when the style sets no color. `blockOutline` no longer renders as an underline.
+- `FileOpener.buildLocationCommand` rejects real NUL bytes — `'\0'` in Dart is the digit `0`, which had made every path containing a zero fail.
+
+### Refactor
+- Extracted `CursorBlinkMixin` to unify cursor blinking in `FileTextField` and `TokenHighlightTextField`.
+- Added additional lints to `analysis_options.yaml`.
+
 ## 0.0.4
 
 ### Features

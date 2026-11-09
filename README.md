@@ -1,5 +1,12 @@
 # **Nocterm File Color** - A Nocterm `TextField` wrapper that displays attached files and colored tokens inline in the input line.
 
+[![Coverage](https://img.shields.io/badge/coverage-95.4%25-brightgreen)](https://github.com/zoocityboy/nocterm_bloc/actions)
+[![Pub Version](https://img.shields.io/pub/v/nocterm_file_color)](https://pub.dev/packages/nocterm_file_color)
+[![pub points](https://img.shields.io/pub/points/nocterm_file_color?logo=dart)](https://pub.dev/packages/nocterm_file_color/score)
+[![Pub Monthly Downloads](https://img.shields.io/pub/dm/nocterm_file_color?logo=dart&color=yellow)](https://pub.dev/packages/nocterm_file_color/score)
+[![Dart](https://img.shields.io/badge/Dart-0175C2?logo=dart)](https://dart.dev)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 ![A composer prompt with colored inline tokens: a pasted file and an agent
 mention shown as colored tags, plus the agent and model line below the
 input](https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/screenshots/input.png)
@@ -19,7 +26,7 @@ Everything attached stays available through `getAttachedFiles()`.
 ```yaml
 dependencies:
   nocterm: ^0.9.0
-  nocterm_file_color: ^0.0.4
+  nocterm_file_color: ^0.0.5
 ```
 
 ## Usage
@@ -165,6 +172,16 @@ class _MyComposerState extends State<MyComposer> {
 - `onSuggestionMenuChanged` — fires when the menu opens/closes, its query
   changes, or the highlight moves. Arrow keys move the highlight without
   editing text, so `onChanged` alone is not enough.
+- `navigationDepth`, `canNavigateBack`, `currentBasePath` — the directory the
+  menu is browsing. A suggestion with a `path` becomes a tree node:
+  `RightArrow` drops into the highlighted folder, `LeftArrow` leaves it, and
+  the caret stays put while the menu is open.
+- `FileTextFieldSuggestion.session` — inserts an `@session <name>` token, with
+  `prefix` to render `@<name>` or a bare `<name>` instead.
+- The menu is split into sections. `SuggestionMenuGrouping` reorders, renames or
+  merges them (several kinds may share one heading), and
+  `visibleSuggestionGroups` hands the same structure to a host-rendered menu.
+  Headings appear only when more than one section is present.
 
 Trigger detection, filtering, keyboard navigation and token insertion stay
 inside the package either way. See `example/` for a full implementation.
@@ -184,8 +201,8 @@ Tune defaults per type and overrides per extension with `FileConfig`.
 
 ## Example
 
-See `example/nocterm_file_color_example.dart` for a complete runnable demo.
+See [`example/nocterm_file_color_example.dart`](example/nocterm_file_color_example.dart) for a complete runnable demo.
 
 ## License
 
-MIT
+[MIT](LICENSE)

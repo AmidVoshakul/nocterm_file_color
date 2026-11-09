@@ -14,9 +14,9 @@ List<FileTextFieldSuggestion> _mockSuggestions(String trigger, String query) {
       bold: true,
     );
     suggestions = [
-      FileTextFieldSuggestion.command(name: 'help', style: style),
-      FileTextFieldSuggestion.command(name: 'clear', style: style),
-      FileTextFieldSuggestion.command(name: 'tmp', style: style),
+      const FileTextFieldSuggestion.command(name: 'help', style: style),
+      const FileTextFieldSuggestion.command(name: 'clear', style: style),
+      const FileTextFieldSuggestion.command(name: 'tmp', style: style),
     ];
   } else {
     const folderStyle = FileStyle(
@@ -166,7 +166,7 @@ void main() {
     });
 
     test('copyWith keeps every field it is not given', () {
-      final file = FileInfo(
+      final file = const FileInfo(
         path: '/tmp/a.txt',
         name: 'a.txt',
         extension: 'txt',
@@ -219,9 +219,9 @@ void main() {
     });
 
     test('styleForExtension returns extension override or null', () {
-      final config = FileConfig(
-        typeStyles: {FileType.code: const FileStyle(text: Colors.red)},
-        extensionStyles: {'dart': const FileStyle(text: Colors.green)},
+      final config = const FileConfig(
+        typeStyles: {FileType.code: FileStyle(text: Colors.red)},
+        extensionStyles: {'dart': FileStyle(text: Colors.green)},
       );
       expect(config.styleForExtension('dart')?.text, Colors.green);
       expect(
@@ -236,9 +236,9 @@ void main() {
     });
 
     test('typeStyles and extensionStyles expose unmodifiable maps', () {
-      final config = FileConfig(
-        typeStyles: {FileType.code: const FileStyle(text: Colors.green)},
-        extensionStyles: {'DART': const FileStyle(text: Colors.blue)},
+      final config = const FileConfig(
+        typeStyles: {FileType.code: FileStyle(text: Colors.green)},
+        extensionStyles: {'DART': FileStyle(text: Colors.blue)},
       );
 
       // Extension keys are normalized to lowercase without a dot.
@@ -255,9 +255,9 @@ void main() {
     });
 
     test('styleFor prefers the extension override over the type default', () {
-      final config = FileConfig(
-        typeStyles: {FileType.code: const FileStyle(text: Colors.green)},
-        extensionStyles: {'dart': const FileStyle(text: Colors.red)},
+      final config = const FileConfig(
+        typeStyles: {FileType.code: FileStyle(text: Colors.green)},
+        extensionStyles: {'dart': FileStyle(text: Colors.red)},
       );
       final dart = FileInfo.fromPath('/tmp/main.dart');
 
@@ -266,7 +266,7 @@ void main() {
 
     test('styleFor falls back to a neutral style for an unknown type', () {
       final config = const FileConfig();
-      final file = FileInfo(
+      final file = const FileInfo(
         path: 'mystery.xyz',
         name: 'mystery.xyz',
         extension: 'xyz',
@@ -281,15 +281,15 @@ void main() {
       const red = FileStyle(text: Colors.red);
       const blue = FileStyle(text: Colors.blue);
 
-      final a = FileConfig(
+      final a = const FileConfig(
         typeStyles: {FileType.code: red, FileType.document: blue},
         extensionStyles: {'dart': red},
       );
-      final b = FileConfig(
+      final b = const FileConfig(
         typeStyles: {FileType.document: blue, FileType.code: red},
         extensionStyles: {'dart': red},
       );
-      final c = FileConfig(
+      final c = const FileConfig(
         typeStyles: {FileType.code: red},
         extensionStyles: {'dart': red},
       );
@@ -560,6 +560,89 @@ void main() {
     });
 
     test(
+      'typing @ in the middle of text keeps the following character',
+      () async {
+        final controller = TextEditingController();
+        final key = GlobalKey<FileTextFieldState>();
+
+        await testNocterm('trigger mid text', (tester) async {
+          await tester.pumpComponent(
+            FileTextField(
+              key: key,
+              controller: controller,
+              focused: true,
+              width: 40,
+              height: 1,
+              onSuggestionsRequested: (trigger, query) => [
+                const FileTextFieldSuggestion.agent(name: 'explore'),
+              ],
+            ),
+          );
+          controller.text = 'hello world';
+          controller.selection = const TextSelection.collapsed(offset: 6);
+          await tester.pump();
+
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+          );
+          await tester.pump();
+
+          expect(controller.text, 'hello @world');
+
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.enter),
+          );
+          await tester.pump();
+
+          expect(controller.text, 'hello [@explore] world');
+        });
+
+        controller.dispose();
+      },
+    );
+
+    test('typing a trigger replaces the selection', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('trigger over selection', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => [
+              const FileTextFieldSuggestion.agent(name: 'explore'),
+            ],
+          ),
+        );
+        controller.text = 'hello world';
+        controller.selection = const TextSelection(
+          baseOffset: 6,
+          extentOffset: 11,
+        );
+        await tester.pump();
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+        expect(controller.text, 'hello @');
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+
+        expect(controller.text, 'hello [@explore] ');
+      });
+
+      controller.dispose();
+    });
+
+    test(
       'types mention trigger as text when no provider is configured',
       () async {
         final controller = TextEditingController();
@@ -606,7 +689,7 @@ void main() {
 
         for (final entry in modifiers.entries) {
           controller.text = 'ab';
-          controller.selection = TextSelection.collapsed(offset: 2);
+          controller.selection = const TextSelection.collapsed(offset: 2);
           await tester.pump();
 
           await tester.sendKeyEvent(
@@ -661,6 +744,78 @@ void main() {
       controller.dispose();
     });
 
+    test('the menu query honors maxLength', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('menu max length', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            maxLength: 8,
+            onSuggestionsRequested: (trigger, query) => [
+              const FileTextFieldSuggestion.agent(name: 'explore'),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+        expect(controller.text, '@');
+
+        for (final character in 'abcdefg'.split('')) {
+          await tester.sendKeyEvent(
+            KeyboardEvent(logicalKey: LogicalKey.keyE, character: character),
+          );
+          await tester.pump();
+        }
+
+        // '@' + 7 chars = 8, so the last one is refused.
+        expect(controller.text, '@abcdefg');
+      });
+
+      controller.dispose();
+    });
+
+    test('arrows keep the caret still even with no matches', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('arrows with no matches', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => const [],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+        expect(tester.terminalState, containsText('No matches'));
+        final offset = controller.selection.extentOffset;
+
+        for (final key in const [
+          LogicalKey.arrowLeft,
+          LogicalKey.arrowRight,
+          LogicalKey.arrowUp,
+          LogicalKey.arrowDown,
+        ]) {
+          await tester.sendKeyEvent(KeyboardEvent(logicalKey: key));
+          await tester.pump();
+        }
+
+        expect(controller.selection.extentOffset, offset);
+      });
+
+      controller.dispose();
+    });
+
     test('kitty ctrl+j inserts a newline in a multiline field', () async {
       final controller = TextEditingController();
 
@@ -675,7 +830,7 @@ void main() {
           ),
         );
         controller.text = 'ab';
-        controller.selection = TextSelection.collapsed(offset: 2);
+        controller.selection = const TextSelection.collapsed(offset: 2);
         await tester.pump();
 
         // Kitty terminals deliver Ctrl+J as `CSI 106;5u`, which parses as
@@ -1053,7 +1208,10 @@ void main() {
 
       const custom = FileStyle(text: Colors.red);
       expect(
-        FileTextFieldSuggestion.agent(name: 'explore', style: custom).style,
+        const FileTextFieldSuggestion.agent(
+          name: 'explore',
+          style: custom,
+        ).style,
         custom,
       );
     });
@@ -1202,7 +1360,7 @@ void main() {
         expect(controller.text, '[image 1] [image 2] ');
 
         // Drop the first token by hand; the second keeps its number.
-        controller.selection = TextSelection.collapsed(offset: 0);
+        controller.selection = const TextSelection.collapsed(offset: 0);
         await tester.sendDelete();
         expect(controller.text, '[image 2] ');
 
@@ -1577,13 +1735,13 @@ void main() {
             width: 40,
             height: 1,
             onSuggestionsRequested: (trigger, query) => [
-              FileTextFieldSuggestion.agent(
+              const FileTextFieldSuggestion.agent(
                 name: 'a',
-                style: const FileStyle(),
+                style: FileStyle(),
               ),
-              FileTextFieldSuggestion.agent(
+              const FileTextFieldSuggestion.agent(
                 name: 'b',
-                style: const FileStyle(),
+                style: FileStyle(),
               ),
             ],
           ),
@@ -1618,9 +1776,9 @@ void main() {
             width: 40,
             height: 1,
             onSuggestionsRequested: (trigger, query) => [
-              FileTextFieldSuggestion.agent(
+              const FileTextFieldSuggestion.agent(
                 name: 'explore',
-                style: const FileStyle(),
+                style: FileStyle(),
               ),
             ],
           ),
@@ -1664,9 +1822,9 @@ void main() {
         await tester.pump();
 
         key.currentState!.selectSuggestion(
-          FileTextFieldSuggestion.agent(
+          const FileTextFieldSuggestion.agent(
             name: 'not-in-the-menu',
-            style: const FileStyle(),
+            style: FileStyle(),
           ),
         );
         await tester.pump();
@@ -1727,9 +1885,9 @@ void main() {
             width: 30,
             height: 1,
             onSuggestionsRequested: (trigger, query) => [
-              FileTextFieldSuggestion.command(
+              const FileTextFieldSuggestion.command(
                 name: 'help',
-                style: const FileStyle(
+                style: FileStyle(
                   text: Colors.brightMagenta,
                   openingDelimiter: '',
                   closingDelimiter: '',
@@ -2130,6 +2288,252 @@ void main() {
       controller.dispose();
     });
 
+    List<FileTextFieldSuggestion> mixedSuggestions(
+      String trigger,
+      String query,
+    ) => [
+      const FileTextFieldSuggestion.folder(name: 'lib/', path: 'lib'),
+      FileTextFieldSuggestion.file(
+        FileInfo.fromPath('README.md'),
+        style: const FileStyle(),
+      ),
+      const FileTextFieldSuggestion.agent(name: 'explore'),
+      const FileTextFieldSuggestion.session(name: 'ses_abc'),
+    ];
+
+    test('default grouping titles each kind group at the root', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('default grouping', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: mixedSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+
+        expect(tester.terminalState, containsText('Files & folders'));
+        expect(tester.terminalState, containsText('Agents'));
+        expect(tester.terminalState, containsText('Sessions'));
+      });
+
+      controller.dispose();
+    });
+
+    test('the file group carries no title while browsing a folder', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('browsing titles', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            suggestionPageSize: 8,
+            onSuggestionsRequested: mixedSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowRight),
+        );
+        await tester.pump();
+
+        expect(key.currentState!.currentBasePath, 'lib');
+        expect(tester.terminalState, isNot(containsText('Files & folders')));
+        expect(tester.terminalState, containsText('Agents'));
+        expect(tester.terminalState, containsText('Sessions'));
+      });
+
+      controller.dispose();
+    });
+
+    test('a single group renders without a title', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('single group', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => [
+              const FileTextFieldSuggestion.command(name: 'help'),
+              const FileTextFieldSuggestion.command(name: 'model'),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.slash, character: '/'),
+        );
+        await tester.pump();
+
+        expect(tester.terminalState, isNot(containsText('Commands')));
+      });
+
+      controller.dispose();
+    });
+
+    test('showHeaders false renders no titles', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('headers off', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            suggestionGrouping: const SuggestionMenuGrouping(
+              showHeaders: false,
+            ),
+            onSuggestionsRequested: mixedSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+
+        expect(tester.terminalState, isNot(containsText('Files & folders')));
+        expect(tester.terminalState, isNot(containsText('Agents')));
+        expect(tester.terminalState, isNot(containsText('Sessions')));
+      });
+
+      controller.dispose();
+    });
+
+    test('custom grouping renames and reorders groups', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('custom grouping', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            suggestionGrouping: const SuggestionMenuGrouping(
+              groups: [
+                SuggestionMenuGroup('Assistants', [
+                  FileTextFieldSuggestionKind.agent,
+                ]),
+                SuggestionMenuGroup('Project', [
+                  FileTextFieldSuggestionKind.file,
+                  FileTextFieldSuggestionKind.folder,
+                ]),
+              ],
+            ),
+            onSuggestionsRequested: mixedSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+
+        expect(tester.terminalState, containsText('Assistants'));
+        expect(tester.terminalState, containsText('Project'));
+        // The session kind is not grouped, so it falls into `Other`.
+        expect(tester.terminalState, containsText('Other'));
+      });
+
+      controller.dispose();
+    });
+
+    test('visibleSuggestionGroups exposes titles and items', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('group views', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: mixedSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+
+        final groups = key.currentState!.visibleSuggestionGroups;
+        expect(groups.map((g) => g.title), [
+          'Files & folders',
+          'Agents',
+          'Sessions',
+        ]);
+        expect(groups.first.items, hasLength(2));
+      });
+
+      controller.dispose();
+    });
+
+    test('titles do not shift the selection index', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('group selection', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: mixedSuggestions,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+
+        // Flat order: lib/, README.md, @explore, @session ses_abc.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowDown),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 1);
+        expect(
+          key
+              .currentState!
+              .visibleSuggestions[key.currentState!.selectedSuggestionIndex]
+              .name,
+          'README.md',
+        );
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowDown),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 2);
+      });
+
+      controller.dispose();
+    });
+
     test('suggestion menu windows to suggestionPageSize rows', () async {
       final controller = TextEditingController();
       final key = GlobalKey<FileTextFieldState>();
@@ -2393,9 +2797,9 @@ void main() {
             width: 40,
             height: 1,
             onSuggestionsRequested: (trigger, query) => [
-              FileTextFieldSuggestion.command(
+              const FileTextFieldSuggestion.command(
                 name: 'help',
-                style: const FileStyle(),
+                style: FileStyle(),
               ),
             ],
           ),
@@ -2433,9 +2837,9 @@ void main() {
                 padding: EdgeInsets.zero,
               ),
               onSuggestionsRequested: (trigger, query) => [
-                FileTextFieldSuggestion.command(
+                const FileTextFieldSuggestion.command(
                   name: 'help',
-                  style: const FileStyle(),
+                  style: FileStyle(),
                 ),
               ],
             ),
@@ -2689,7 +3093,7 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
         expect(key.currentState!.getExpandedText(), 'a\nb\nc\nd e\nf\ng\nh');
 
         // Backspace on the second label removes that span only.
-        controller.selection = TextSelection.collapsed(offset: 35);
+        controller.selection = const TextSelection.collapsed(offset: 35);
         await tester.pump();
         await tester.sendBackspace();
         await tester.pump();
@@ -2750,7 +3154,7 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
           ),
         );
         controller.text = 'hi ';
-        controller.selection = TextSelection.collapsed(offset: 3);
+        controller.selection = const TextSelection.collapsed(offset: 3);
         await tester.pump();
 
         ClipboardManager.copy('a\nb\nc\nd');
@@ -2772,7 +3176,7 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
 
         // Deleting the tag takes only the tag and its own separator: the
         // space typed before it survives and `x` stays put.
-        controller.selection = TextSelection.collapsed(offset: 20);
+        controller.selection = const TextSelection.collapsed(offset: 20);
         await tester.pump();
         await tester.sendBackspace();
         await tester.pump();
@@ -2798,14 +3202,14 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
           ),
         );
         controller.text = 'hi ';
-        controller.selection = TextSelection.collapsed(offset: 3);
+        controller.selection = const TextSelection.collapsed(offset: 3);
         await tester.pump();
 
         key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
         await tester.pump();
         expect(controller.text, 'hi [main.dart] ');
 
-        controller.selection = TextSelection.collapsed(offset: 15);
+        controller.selection = const TextSelection.collapsed(offset: 15);
         await tester.pump();
         await tester.sendBackspace();
         await tester.pump();
@@ -3263,16 +3667,22 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
         await tester.pump();
         controller.text = '[main.dart] ab';
         // Caret on the plain text, where the cell has no background of its own.
-        controller.selection = TextSelection.collapsed(offset: 12);
+        controller.selection = const TextSelection.collapsed(offset: 12);
         await tester.pump();
 
+        // Phase-independent: the caret must be observed both on and off.
         Color? backgroundColor() =>
             tester.terminalState.getCellAt(12, 0)?.style.backgroundColor;
-        expect(backgroundColor(), isNotNull);
-        await tester.pump(const Duration(milliseconds: 60));
-        expect(backgroundColor(), isNull);
-        await tester.pump(const Duration(milliseconds: 60));
-        expect(backgroundColor(), isNotNull);
+        final seen = <Color?>{};
+        for (var i = 0; i < 4; i++) {
+          seen.add(backgroundColor());
+          await tester.pump(const Duration(milliseconds: 60));
+        }
+        expect(
+          seen.whereType<Color>().isNotEmpty && seen.contains(null),
+          isTrue,
+          reason: 'the caret blinks between visible and hidden phases',
+        );
       });
 
       controller.dispose();
@@ -3479,6 +3889,307 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
       controller.dispose();
     });
 
+    test('right arrow drops into a folder and left arrow leaves it', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('folder navigation', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => [
+              const FileTextFieldSuggestion.folder(
+                name: 'lib/',
+                path: 'lib',
+                searchText: 'lib folder',
+              ),
+              FileTextFieldSuggestion.file(
+                FileInfo.fromPath('lib/main.dart'),
+                path: 'lib/main.dart',
+                style: const FileStyle(),
+              ),
+              FileTextFieldSuggestion.file(
+                FileInfo.fromPath('lib/src/main.dart'),
+                path: 'lib/src/main.dart',
+                style: const FileStyle(),
+              ),
+              const FileTextFieldSuggestion.agent(name: 'explore'),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+        // The root lists everything; agents keep no path so they stay.
+        expect(key.currentState!.navigationDepth, 1);
+        expect(key.currentState!.canNavigateBack, isFalse);
+        expect(key.currentState!.currentBasePath, isNull);
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowRight),
+        );
+        await tester.pump();
+
+        // Only `lib`'s direct child remains (plus the agent).
+        expect(key.currentState!.currentBasePath, 'lib');
+        expect(key.currentState!.canNavigateBack, isTrue);
+        expect(key.currentState!.navigationDepth, 2);
+        expect(
+          key.currentState!.visibleSuggestions.map((s) => s.path ?? s.name),
+          ['lib/main.dart', 'explore'],
+        );
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowLeft),
+        );
+        await tester.pump();
+
+        expect(key.currentState!.currentBasePath, isNull);
+        expect(
+          key.currentState!.visibleSuggestions.map((s) => s.path ?? s.name),
+          ['lib', 'lib/main.dart', 'lib/src/main.dart', 'explore'],
+        );
+      });
+
+      controller.dispose();
+    });
+
+    test('entering a folder clears the query from the field', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('query cleared on enter', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => [
+              const FileTextFieldSuggestion.folder(
+                name: 'lib/',
+                path: 'lib',
+                searchText: 'lib folder',
+              ),
+              FileTextFieldSuggestion.file(
+                FileInfo.fromPath('lib/main.dart'),
+                path: 'lib/main.dart',
+                style: const FileStyle(),
+              ),
+            ],
+          ),
+        );
+        // A query that still matches the folder row.
+        await tester.enterText('@li');
+        await tester.pump();
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowRight),
+        );
+        await tester.pump();
+
+        expect(controller.text, '@');
+        expect(key.currentState!.currentBasePath, 'lib');
+      });
+
+      controller.dispose();
+    });
+
+    test('the child filter respects the path boundary', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('path boundary', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => [
+              const FileTextFieldSuggestion.folder(
+                name: 'lib/',
+                path: 'lib',
+                searchText: 'lib folder',
+              ),
+              // A sibling that merely starts with the folder's name.
+              FileTextFieldSuggestion.file(
+                FileInfo.fromPath('library.txt'),
+                path: 'library.txt',
+                style: const FileStyle(),
+              ),
+              FileTextFieldSuggestion.file(
+                FileInfo.fromPath('lib/main.dart'),
+                path: 'lib/main.dart',
+                style: const FileStyle(),
+              ),
+              FileTextFieldSuggestion.file(
+                FileInfo.fromPath('lib/src/main.dart'),
+                path: 'lib/src/main.dart',
+                style: const FileStyle(),
+              ),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowRight),
+        );
+        await tester.pump();
+
+        expect(
+          key.currentState!.visibleSuggestions.map((s) => s.path ?? s.name),
+          ['lib/main.dart'],
+        );
+      });
+
+      controller.dispose();
+    });
+
+    test('right arrow on a non-folder row does not navigate', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('no folder navigation', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => [
+              const FileTextFieldSuggestion.folder(name: 'lib/', path: 'lib'),
+              FileTextFieldSuggestion.file(
+                FileInfo.fromPath('README.md'),
+                path: 'README.md',
+                style: const FileStyle(),
+              ),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+        // Highlight the file row, then try to drop into it.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowDown),
+        );
+        await tester.pump();
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowRight),
+        );
+        await tester.pump();
+
+        expect(key.currentState!.currentBasePath, isNull);
+      });
+
+      controller.dispose();
+    });
+
+    test('left arrow at the root does not navigate back', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('root left arrow', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => [
+              const FileTextFieldSuggestion.folder(name: 'lib/', path: 'lib'),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowLeft),
+        );
+        await tester.pump();
+
+        expect(key.currentState!.navigationDepth, 1);
+        expect(key.currentState!.currentBasePath, isNull);
+      });
+
+      controller.dispose();
+    });
+
+    test('the caret stays put while the menu is open', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('caret locked by menu', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => [
+              const FileTextFieldSuggestion.folder(name: 'lib/', path: 'lib'),
+              FileTextFieldSuggestion.file(
+                FileInfo.fromPath('lib/main.dart'),
+                path: 'lib/main.dart',
+                style: const FileStyle(),
+              ),
+              const FileTextFieldSuggestion.agent(name: 'explore'),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+        final offset = controller.selection.extentOffset;
+
+        // None of the navigation keys move the caret while the menu owns them.
+        for (final key_ in const [
+          LogicalKey.arrowLeft,
+          LogicalKey.arrowRight,
+          LogicalKey.arrowUp,
+          LogicalKey.arrowDown,
+          LogicalKey.home,
+          LogicalKey.end,
+          LogicalKey.pageUp,
+          LogicalKey.pageDown,
+        ]) {
+          await tester.sendKeyEvent(KeyboardEvent(logicalKey: key_));
+          await tester.pump();
+        }
+
+        expect(controller.selection.extentOffset, offset);
+        // Navigation did happen (the first RightArrow dropped into `lib`), and
+        // a LeftArrow after the loop still finds its way back out.
+        expect(key.currentState!.currentBasePath, 'lib');
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowLeft),
+        );
+        await tester.pump();
+        expect(key.currentState!.currentBasePath, isNull);
+        expect(controller.selection.extentOffset, offset);
+      });
+
+      controller.dispose();
+    });
+
     test('a selection over a token paints the selection color', () async {
       final controller = TextEditingController();
       final key = GlobalKey<FileTextFieldState>();
@@ -3537,7 +4248,7 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
         key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
         await tester.pump();
         controller.text = '[main.dart] ab';
-        controller.selection = TextSelection.collapsed(offset: 1);
+        controller.selection = const TextSelection.collapsed(offset: 1);
         await tester.pump();
 
         expect(
@@ -3712,7 +4423,7 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
           await tester.pump();
           // The user removed the separator the tag brought with it.
           controller.text = 'hi [main.dart]';
-          controller.selection = TextSelection.collapsed(offset: 15);
+          controller.selection = const TextSelection.collapsed(offset: 15);
           await tester.pump();
 
           await tester.sendBackspace();
@@ -3744,7 +4455,7 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
         key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
         await tester.pump();
         controller.text = '你[main.dart]';
-        controller.selection = TextSelection.collapsed(offset: 13);
+        controller.selection = const TextSelection.collapsed(offset: 13);
         await tester.pump();
 
         // 你 occupies columns 0-1, so column 4 lands inside the token body.
@@ -3809,6 +4520,78 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
     });
   });
 
+  group('SuggestionMenuGrouping', () {
+    test('equality covers order, titles and flags', () {
+      const grouping = SuggestionMenuGrouping();
+      const same = SuggestionMenuGrouping();
+      const renamed = SuggestionMenuGrouping(
+        groups: [SuggestionMenuGroup('Stuff', [])],
+      );
+      const otherFlag = SuggestionMenuGrouping(
+        groups: [
+          SuggestionMenuGroup('Files & folders', [
+            FileTextFieldSuggestionKind.file,
+            FileTextFieldSuggestionKind.folder,
+          ]),
+          SuggestionMenuGroup('Agents', [FileTextFieldSuggestionKind.agent]),
+          SuggestionMenuGroup('Sessions', [
+            FileTextFieldSuggestionKind.session,
+          ]),
+          SuggestionMenuGroup('Commands', [
+            FileTextFieldSuggestionKind.command,
+          ]),
+        ],
+      );
+      const ungrouped = SuggestionMenuGrouping(ungroupedTitle: 'Misc');
+      const noHeaders = SuggestionMenuGrouping(showHeaders: false);
+
+      expect(grouping, same);
+      expect(grouping.hashCode, same.hashCode);
+      for (final other in [renamed, otherFlag, ungrouped, noHeaders]) {
+        expect(grouping, isNot(other));
+        expect(grouping.hashCode, isNot(other.hashCode));
+      }
+    });
+
+    test('a kind not listed by any group is not lost', () async {
+      final key = GlobalKey<FileTextFieldState>();
+      final controller = TextEditingController();
+
+      await testNocterm('ungrouped kinds', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            suggestionGrouping: const SuggestionMenuGrouping(
+              groups: [
+                SuggestionMenuGroup('Only agents', [
+                  FileTextFieldSuggestionKind.agent,
+                ]),
+              ],
+            ),
+            onSuggestionsRequested: (trigger, query) => [
+              const FileTextFieldSuggestion.agent(name: 'explore'),
+              const FileTextFieldSuggestion.session(name: 'ses_x'),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+
+        final groups = key.currentState!.visibleSuggestionGroups;
+        expect(groups.map((group) => group.title), ['Only agents', 'Other']);
+        expect(groups.last.items.single.name, 'ses_x');
+      });
+
+      controller.dispose();
+    });
+  });
+
   group('FileStyle', () {
     test('equality includes italic and underline', () {
       const full = FileStyle(text: Colors.cyan, italic: true, underline: true);
@@ -3844,7 +4627,7 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
             width: 30,
             height: 1,
             tokens: [
-              InlineToken(
+              const InlineToken(
                 token: '@explore',
                 style: FileStyle(
                   text: Colors.brightCyan,
@@ -3903,7 +4686,7 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
             width: 30,
             height: 1,
             tokens: [
-              InlineToken(
+              const InlineToken(
                 token: '@explore',
                 style: FileStyle(text: Colors.brightCyan),
               ),
@@ -3943,11 +4726,11 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
             width: 30,
             height: 1,
             tokens: [
-              InlineToken(
+              const InlineToken(
                 token: '@x',
                 style: FileStyle(text: Colors.brightCyan),
               ),
-              InlineToken(
+              const InlineToken(
                 token: '@x',
                 style: FileStyle(text: Colors.brightCyan),
               ),
@@ -4228,14 +5011,19 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
         );
         await tester.pump();
 
-        // Starts visible, toggles off after one period, on again after two.
+        // Phase-independent: the caret must be observed both on and off.
         Color? backgroundColor() =>
             tester.terminalState.getCellAt(1, 0)?.style.backgroundColor;
-        expect(backgroundColor(), isNotNull);
-        await tester.pump(const Duration(milliseconds: 60));
-        expect(backgroundColor(), isNull);
-        await tester.pump(const Duration(milliseconds: 60));
-        expect(backgroundColor(), isNotNull);
+        final seen = <Color?>{};
+        for (var i = 0; i < 4; i++) {
+          seen.add(backgroundColor());
+          await tester.pump(const Duration(milliseconds: 60));
+        }
+        expect(
+          seen.whereType<Color>().isNotEmpty && seen.contains(null),
+          isTrue,
+          reason: 'the caret blinks between visible and hidden phases',
+        );
       });
 
       controller.dispose();
@@ -4253,7 +5041,7 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
             height: 1,
             obscureText: true,
             tokens: [
-              InlineToken(
+              const InlineToken(
                 token: '@x',
                 style: FileStyle(text: Colors.brightCyan),
               ),
@@ -4284,7 +5072,7 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
             width: 30,
             height: 1,
             tokens: [
-              InlineToken(
+              const InlineToken(
                 token: '@x',
                 style: FileStyle(text: Colors.brightCyan),
               ),
@@ -4309,7 +5097,7 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
     test('renders colored inline tokens without editing', () async {
       await testNocterm('token text colored', (tester) async {
         await tester.pumpComponent(
-          TokenText(
+          const TokenText(
             text: 'check @explore and /help',
             tokens: [
               InlineToken(

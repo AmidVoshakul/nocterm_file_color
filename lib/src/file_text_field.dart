@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:characters/characters.dart';
 import 'package:nocterm/nocterm.dart';
 
@@ -8,9 +6,11 @@ import 'file_info.dart';
 import 'file_opener.dart';
 import 'file_tag.dart';
 import 'file_text_field_suggestion.dart';
+import 'suggestion_grouping.dart';
 import 'suggestion_menu_style.dart';
 import 'inline_token.dart';
 import 'token_spans.dart';
+import 'cursor_blink_mixin.dart';
 
 // ---------------------------------------------------------------------------
 // Internal token model
@@ -145,6 +145,7 @@ class FileTextField extends StatefulComponent {
     this.suggestionMenuBuilder,
     this.slashAnchor = SlashAnchor.anywhere,
     this.suggestionMenuStyle = const SuggestionMenuStyle(),
+    this.suggestionGrouping = const SuggestionMenuGrouping(),
     this.enablePasteCollapse = true,
     this.pasteCollapseMinLines = 3,
     this.pasteCollapseMinChars = 150,
@@ -231,6 +232,9 @@ class FileTextField extends StatefulComponent {
   /// Visual style for the built-in suggestion menu.
   final SuggestionMenuStyle suggestionMenuStyle;
 
+  /// Section order and headings of the suggestion menu.
+  final SuggestionMenuGrouping suggestionGrouping;
+
   /// Whether large pastes are collapsed into a `[Pasted ~N lines]` tag.
   final bool enablePasteCollapse;
 
@@ -267,22 +271,33 @@ class FileTextField extends StatefulComponent {
 // State
 // ---------------------------------------------------------------------------
 
+class _SuggestionNavFrame {
+  const _SuggestionNavFrame({
+    required this.trigger,
+    required this.query,
+    required this.basePath,
+  });
+  final String trigger;
+  final String query;
+  final String? basePath;
+}
+
 /// Mutable state for [FileTextField], exposed via [GlobalKey] for [getAttachedFiles].
-class FileTextFieldState extends State<FileTextField> {
+class FileTextFieldState extends State<FileTextField>
+    with CursorBlinkMixin<FileTextField> {
   late TextEditingController _controller;
   bool _controllerIsInternal = false;
   final List<FileInfo> _attachedFiles = [];
   final List<_InlineToken> _inlineTokens = [];
-  Timer? _cursorBlinkTimer;
-  bool _cursorBlinkActive = false;
-  Duration? _cursorBlinkRate;
-  bool _cursorVisible = true;
   String? _activeTrigger;
   String _suggestionQuery = '';
   int _suggestionStartOffset = 0;
   List<FileTextFieldSuggestion> _providedSuggestions = const [];
   int _selectedSuggestionIndex = 0;
   int _suggestionScrollOffset = 0;
+
+  // Navigation stack for directory browsing
+  final List<_SuggestionNavFrame> _navStack = [];
 
   // -- Public API: attachments ----------------------------------------------
 
@@ -291,6 +306,12 @@ class FileTextFieldState extends State<FileTextField> {
   /// Call this before sending the message to the AI model to include all
   /// attachments in the context.
   List<FileInfo> getAttachedFiles() => List.unmodifiable(_attachedFiles);
+
+  /// Navigation helpers for directory browsing
+  int get navigationDepth => _navStack.length;
+  bool get canNavigateBack => _navStack.length > 1;
+  String? get currentBasePath =>
+      _navStack.isNotEmpty ? _navStack.last.basePath : null;
 
   /// Returns the full text of every collapsed paste currently in the field.
   List<String> getPastedTexts() => List.unmodifiable(
@@ -301,25 +322,29 @@ class FileTextFieldState extends State<FileTextField> {
   );
 
   /// Returns the field text with every collapsed paste tag expanded back to
-  /// its full text.
-  /// Returns the field text with every collapsed paste tag expanded back to
   /// its full text. Without collapsed pastes the text comes back untouched, so
-  /// a submit observes exactly what the controller holds. Re-anchors ranges as
-  /// a side effect, since callers (submit, hosts) run outside a build.
+  /// a submit observes exactly what the controller holds. Read-only: ranges
+  /// are anchored by the controller listener, so nothing is mutated here.
   String getExpandedText() {
     final text = _controller.text;
     final pasted = _inlineTokens.where((token) => token.isPasted).toList();
     if (pasted.isEmpty) return text;
 
-    _anchorTokens(text);
-
+    // Compute ranges locally without mutating state
     final replacements = <(int start, int end, String text)>[];
+    var cursor = 0;
     for (final token in pasted) {
-      final start = token.start;
-      final end = token.end;
-      if (start != null && end != null) {
-        replacements.add((start, end, token.pastedText!));
-      }
+      final stored = token.start;
+      final fitsStored =
+          stored != null &&
+          stored >= cursor &&
+          stored + token.token.length <= text.length &&
+          text.startsWith(token.token, stored);
+      final start = fitsStored ? stored : text.indexOf(token.token, cursor);
+      if (start < 0) continue;
+      final end = start + token.token.length;
+      replacements.add((start, end, token.pastedText!));
+      cursor = end;
     }
 
     // Expand right to left so the offsets stay valid.
@@ -426,6 +451,58 @@ class FileTextFieldState extends State<FileTextField> {
   int get selectedSuggestionIndex =>
       _activeTrigger == null ? -1 : _selectedSuggestionIndex;
 
+  /// Sections of the open menu, in render order.
+  ///
+  /// A section's [SuggestionMenuGroupView.title] is `null` when it renders
+  /// without a heading: headings are off, this is the only section, or the
+  /// section opts out of one while browsing a directory. Host-rendered menus
+  /// draw the headings themselves.
+  List<SuggestionMenuGroupView> get visibleSuggestionGroups {
+    final items = _visibleSuggestions;
+    if (items.isEmpty) return const [];
+
+    final grouping = component.suggestionGrouping;
+    final browsing = canNavigateBack;
+    final buckets = <int, List<FileTextFieldSuggestion>>{};
+    final ungrouped = <FileTextFieldSuggestion>[];
+
+    for (final item in items) {
+      final groupIndex = grouping.groups.indexWhere(
+        (group) => group.kinds.contains(item.kind),
+      );
+      if (groupIndex < 0) {
+        ungrouped.add(item);
+        continue;
+      }
+      buckets.putIfAbsent(groupIndex, () => []).add(item);
+    }
+
+    final populated = <(SuggestionMenuGroup?, List<FileTextFieldSuggestion>)>[];
+    for (var i = 0; i < grouping.groups.length; i++) {
+      final bucket = buckets[i];
+      if (bucket == null || bucket.isEmpty) continue;
+      populated.add((grouping.groups[i], bucket));
+    }
+    if (ungrouped.isNotEmpty) populated.add((null, ungrouped));
+
+    // A lone section needs no heading.
+    final headings = grouping.showHeaders && populated.length > 1;
+
+    return [
+      for (final entry in populated)
+        () {
+          final group = entry.$1;
+          final title = group != null ? group.title : grouping.ungroupedTitle;
+          final show =
+              headings && ((group?.headerWhileBrowsed ?? true) || !browsing);
+          return SuggestionMenuGroupView(
+            show ? title : null,
+            List.unmodifiable(entry.$2),
+          );
+        }(),
+    ];
+  }
+
   /// First index of the currently visible window into [visibleSuggestions].
   ///
   /// The built-in inline menu uses this together with [suggestionPageSize] to
@@ -529,7 +606,12 @@ class FileTextFieldState extends State<FileTextField> {
     final inlineToken = _inlineTokens.removeAt(tokenIndex);
     final token = inlineToken.token;
     final text = _controller.text;
-    final index = text.indexOf(token);
+    // The token's own span, not the first lookalike: two files can share a
+    // basename and therefore the same label.
+    var index = inlineToken.start ?? -1;
+    if (index < 0 || !text.startsWith(token, index)) {
+      index = text.indexOf(token);
+    }
     if (index < 0) return;
 
     final range = _attachmentRemovalRange(text, index, index + token.length);
@@ -563,25 +645,13 @@ class FileTextFieldState extends State<FileTextField> {
 
   void _syncCursorBlink() {
     final showInlineTags = _inlineTokens.isNotEmpty && !component.obscureText;
-    final want = showInlineTags && component.focused && component.showCursor;
-    if (want == _cursorBlinkActive &&
-        component.cursorBlinkRate == _cursorBlinkRate) {
-      return;
-    }
-    _cursorBlinkActive = want;
-    _cursorBlinkRate = component.cursorBlinkRate;
-    _cursorBlinkTimer?.cancel();
-    _cursorBlinkTimer = null;
-    if (want) {
-      _cursorVisible = true;
-      if (component.cursorBlinkRate != null) {
-        _cursorBlinkTimer = Timer.periodic(component.cursorBlinkRate!, (_) {
-          if (mounted) setState(() => _cursorVisible = !_cursorVisible);
-        });
-      }
-    } else {
-      _cursorVisible = false;
-    }
+    syncCursorBlink(
+      hasTokens: showInlineTags,
+      obscureText: component.obscureText,
+      focused: component.focused,
+      showCursor: component.showCursor,
+      cursorBlinkRate: component.cursorBlinkRate,
+    );
   }
 
   void _syncAttachmentsFromText() {
@@ -680,7 +750,6 @@ class FileTextFieldState extends State<FileTextField> {
 
   @override
   void dispose() {
-    _cursorBlinkTimer?.cancel();
     _controller.removeListener(_handleControllerChanged);
     if (_controllerIsInternal) {
       _controller.dispose();
@@ -801,7 +870,9 @@ class FileTextFieldState extends State<FileTextField> {
   }
 
   bool _isTriggerBoundary() {
-    final offset = _controller.selection.extentOffset.clamp(
+    // The start of the selection: a range selection types at its start, so a
+    // word preceded by a space is still a valid mention boundary.
+    final offset = _controller.selection.start.clamp(
       0,
       _controller.text.length,
     );
@@ -813,10 +884,7 @@ class FileTextFieldState extends State<FileTextField> {
       case SlashAnchor.anywhere:
         return _isTriggerBoundary();
       case SlashAnchor.startOnly:
-        return _controller.selection.extentOffset.clamp(
-              0,
-              _controller.text.length,
-            ) ==
+        return _controller.selection.start.clamp(0, _controller.text.length) ==
             0;
     }
   }
@@ -827,10 +895,16 @@ class FileTextFieldState extends State<FileTextField> {
 
   void _openSuggestions(String trigger) {
     final text = _controller.text;
-    _suggestionStartOffset = _controller.selection.extentOffset.clamp(
-      0,
-      text.length,
-    );
+    final selection = _controller.selection;
+    final start = selection.start.clamp(0, text.length);
+    final end = selection.end.clamp(0, text.length);
+    // The trigger key was consumed by [_handleKeyEvent], so it is inserted
+    // here — over the selection, exactly as typing it would. Every later
+    // rewrite of the trigger region can then assume it is present.
+    _controller.text =
+        '${text.substring(0, start)}$trigger${text.substring(end)}';
+    _controller.selection = TextSelection.collapsed(offset: start + 1);
+    _suggestionStartOffset = start;
     _setSuggestionState(() {
       _activeTrigger = trigger;
       _suggestionQuery = '';
@@ -838,7 +912,12 @@ class FileTextFieldState extends State<FileTextField> {
       _suggestionScrollOffset = 0;
       _refreshSuggestions();
     });
-    _replaceSuggestionInput('');
+    // The stack always holds the frame the menu opened at, so navigation has a
+    // root to return to.
+    _navStack.clear();
+    _navStack.add(
+      _SuggestionNavFrame(trigger: trigger, query: '', basePath: null),
+    );
   }
 
   /// Applies a suggestion-menu state change and notifies the host, so a menu
@@ -901,6 +980,24 @@ class FileTextFieldState extends State<FileTextField> {
       }
       return true;
     }
+    // While the menu is open the caret stands still: the left/right arrows
+    // browse the tree instead of moving through the text. Only folders carry a
+    // path to drop into.
+    if (event.logicalKey == LogicalKey.arrowRight) {
+      final suggestions = _visibleSuggestions;
+      if (suggestions.isNotEmpty) {
+        final highlighted = suggestions[_selectedSuggestionIndex];
+        if (highlighted.kind == FileTextFieldSuggestionKind.folder &&
+            highlighted.path != null) {
+          _navigateIntoFolder(highlighted);
+        }
+      }
+      return true;
+    }
+    if (event.logicalKey == LogicalKey.arrowLeft) {
+      _navigateBack();
+      return true;
+    }
     if (event.logicalKey == LogicalKey.arrowUp ||
         event.logicalKey == LogicalKey.arrowDown) {
       final suggestions = _visibleSuggestions;
@@ -953,6 +1050,15 @@ class FileTextFieldState extends State<FileTextField> {
         return false;
       }
       final query = '$_suggestionQuery${event.character!}';
+      // The menu writes through the controller, so honor maxLength here the
+      // way Nocterm's own insertion does.
+      final maxLength = component.maxLength;
+      final text = _controller.text;
+      final triggerLength = 1 + _suggestionQuery.length;
+      if (maxLength != null &&
+          text.length - triggerLength + event.character!.length > maxLength) {
+        return true;
+      }
       _replaceSuggestionInput(query);
       _setSuggestionState(() {
         _suggestionQuery = query;
@@ -977,6 +1083,41 @@ class FileTextFieldState extends State<FileTextField> {
       _providedSuggestions = const [];
       _selectedSuggestionIndex = 0;
       _suggestionScrollOffset = 0;
+      _navStack.clear();
+    });
+  }
+
+  void _navigateIntoFolder(FileTextFieldSuggestion suggestion) {
+    if (_navStack.isEmpty || suggestion.path == null) return;
+    final current = _navStack.last;
+    _navStack.add(
+      _SuggestionNavFrame(
+        trigger: current.trigger,
+        query: _suggestionQuery,
+        basePath: suggestion.path,
+      ),
+    );
+    _setSuggestionState(() {
+      // Replace the trigger text first, while it still spans the old query.
+      _replaceSuggestionInput('');
+      _suggestionQuery = '';
+      _refreshSuggestions();
+      _selectedSuggestionIndex = 0;
+      _adjustSuggestionScrollOffset();
+    });
+  }
+
+  void _navigateBack() {
+    if (_navStack.length <= 1) return;
+    _navStack.removeLast();
+    final previous = _navStack.last;
+    _setSuggestionState(() {
+      // Replace the trigger text first, while it still spans the old query.
+      _replaceSuggestionInput(previous.query);
+      _suggestionQuery = previous.query;
+      _refreshSuggestions();
+      _selectedSuggestionIndex = 0;
+      _adjustSuggestionScrollOffset();
     });
   }
 
@@ -1005,9 +1146,28 @@ class FileTextFieldState extends State<FileTextField> {
   void _refreshSuggestions() {
     final trigger = _activeTrigger;
     final provider = component.onSuggestionsRequested;
-    _providedSuggestions = trigger == null || provider == null
+    final List<FileTextFieldSuggestion> all =
+        trigger == null || provider == null
         ? const []
-        : List.unmodifiable(provider(trigger, _suggestionQuery));
+        : provider(trigger, _suggestionQuery);
+    final basePath = currentBasePath;
+    const sep = '/';
+    final filtered = basePath == null
+        ? all
+        : all.where((s) {
+            // Agents, commands and sessions carry no path: they stay listed
+            // while the directory tree is browsed.
+            final p = s.path;
+            if (p == null) return true;
+            // Boundary match: `lib` must not claim the sibling `library.txt`.
+            final base = basePath.endsWith(sep)
+                ? basePath.substring(0, basePath.length - 1)
+                : basePath;
+            if (!p.startsWith('$base$sep')) return false;
+            final remainder = p.substring(base.length + sep.length);
+            return !remainder.contains(sep);
+          }).toList();
+    _providedSuggestions = List.unmodifiable(filtered);
     _selectedSuggestionIndex = 0;
     _suggestionScrollOffset = 0;
   }
@@ -1070,14 +1230,7 @@ class FileTextFieldState extends State<FileTextField> {
     if (file != null) {
       attachFile(file, style: suggestion.style);
     } else {
-      final label = switch (suggestion.kind) {
-        FileTextFieldSuggestionKind.folder => suggestion.name,
-        FileTextFieldSuggestionKind.agent => '@${suggestion.name}',
-        FileTextFieldSuggestionKind.command => '/${suggestion.name}',
-        FileTextFieldSuggestionKind.file => throw StateError(
-          'File suggestions must include a FileInfo.',
-        ),
-      };
+      final label = suggestion.displayLabel;
       final token =
           '${suggestion.style.openingDelimiter}$label${suggestion.style.closingDelimiter}';
       setState(() {
@@ -1232,9 +1385,7 @@ class FileTextFieldState extends State<FileTextField> {
                   selectionStart: selection.start.clamp(0, text.length),
                   selectionEnd: selection.end.clamp(0, text.length),
                   cursorOffset:
-                      component.focused &&
-                          component.showCursor &&
-                          _cursorVisible
+                      component.focused && component.showCursor && cursorVisible
                       ? selection.extentOffset.clamp(0, text.length)
                       : null,
                   cursorColor: cursorColor,
@@ -1301,6 +1452,17 @@ class FileTextFieldState extends State<FileTextField> {
     final markerWidth = markerPrefix.length;
     final unselectedPrefix = marker.isEmpty ? '' : ' ' * markerWidth;
 
+    // Interleave section headings with the windowed rows. Headings are not
+    // rows of their own: offsets stay those of [visibleSuggestions].
+    final rows = <({String? heading, int index})>[];
+    for (var i = 0; i < visible.length; i++) {
+      final flatIndex = offset + i;
+      rows.add((
+        heading: _suggestionHeadingBefore(flatIndex),
+        index: flatIndex,
+      ));
+    }
+
     return MouseRegion(
       onHover: (event) {
         if (event.button == MouseButton.wheelUp) {
@@ -1319,25 +1481,33 @@ class FileTextFieldState extends State<FileTextField> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: suggestions.isEmpty
-              ? [Text('No matches', style: TextStyle(color: Colors.gray))]
+              ? [const Text('No matches', style: TextStyle(color: Colors.gray))]
               : [
-                  for (var i = 0; i < visible.length; i++)
+                  for (final row in rows) ...[
+                    if (row.heading != null)
+                      Text(
+                        row.heading!,
+                        style: TextStyle(
+                          color: style.groupHeaderTextColor ?? Colors.gray,
+                          backgroundColor: style.groupHeaderBackgroundColor,
+                        ),
+                      ),
                     GestureDetector(
-                      onTap: () => _selectSuggestion(visible[i]),
+                      onTap: () => _selectSuggestion(suggestions[row.index]),
                       child: Container(
-                        color: offset + i == _selectedSuggestionIndex
+                        color: row.index == _selectedSuggestionIndex
                             ? style.selectedBackgroundColor
                             : null,
                         padding: const EdgeInsets.symmetric(horizontal: 1),
                         child: RichText(
                           text: TextSpan(
                             children: _highlightedSuggestionRow(
-                              prefix: offset + i == _selectedSuggestionIndex
+                              prefix: row.index == _selectedSuggestionIndex
                                   ? markerPrefix
                                   : unselectedPrefix,
-                              label: visible[i].displayLabel,
+                              label: suggestions[row.index].displayLabel,
                               query: _suggestionQuery,
-                              selected: offset + i == _selectedSuggestionIndex,
+                              selected: row.index == _selectedSuggestionIndex,
                               selectedTextColor: style.selectedTextColor,
                               itemTextColor: style.itemTextColor,
                               highlightMarkerColor:
@@ -1348,10 +1518,27 @@ class FileTextFieldState extends State<FileTextField> {
                         ),
                       ),
                     ),
+                  ],
                 ],
         ),
       ),
     );
+  }
+
+  /// Heading drawn ahead of [flatIndex], or `null` when the row starts no
+  /// titled section.
+  String? _suggestionHeadingBefore(int flatIndex) {
+    var index = 0;
+    for (final group in visibleSuggestionGroups) {
+      final title = group.title;
+      if (title == null) {
+        index += group.items.length;
+        continue;
+      }
+      if (index == flatIndex) return title;
+      index += group.items.length;
+    }
+    return null;
   }
 
   List<TextSpan> _highlightedSuggestionRow({
@@ -1447,10 +1634,14 @@ class FileTextFieldState extends State<FileTextField> {
     for (final inlineToken in _inlineTokens) {
       final file = inlineToken.file;
       if (file == null) continue;
-      final tokenStart = text.indexOf(inlineToken.token);
+      final tokenStart = inlineToken.start ?? text.indexOf(inlineToken.token);
+      final tokenEnd =
+          inlineToken.end ??
+          (tokenStart >= 0 ? tokenStart + inlineToken.token.length : -1);
       if (tokenStart >= 0 &&
+          tokenEnd > tokenStart &&
           offset >= tokenStart &&
-          offset < tokenStart + inlineToken.token.length) {
+          offset < tokenEnd) {
         if (component.onFileClick != null) {
           component.onFileClick!(file);
         } else {

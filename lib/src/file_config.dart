@@ -127,40 +127,40 @@ class FileConfig {
   /// Every [FileType] gets a distinct foreground/background pair drawn from the
   /// Nocterm palette. Use it as a starting point and override what you need.
   factory FileConfig.defaultConfig() {
-    return FileConfig(
+    return const FileConfig(
       typeStyles: {
-        FileType.image: const FileStyle(
+        FileType.image: FileStyle(
           text: Colors.black,
           background: Colors.magenta,
           prefix: 'image',
           bold: true,
         ),
-        FileType.document: const FileStyle(
+        FileType.document: FileStyle(
           text: Colors.black,
           background: Colors.blue,
           prefix: 'document',
         ),
-        FileType.code: const FileStyle(
+        FileType.code: FileStyle(
           text: Colors.black,
           background: Colors.green,
           prefix: 'code',
         ),
-        FileType.archive: const FileStyle(
+        FileType.archive: FileStyle(
           text: Colors.black,
           background: Colors.yellow,
           prefix: 'archive',
         ),
-        FileType.audio: const FileStyle(
+        FileType.audio: FileStyle(
           text: Colors.black,
           background: Colors.cyan,
           prefix: 'audio',
         ),
-        FileType.video: const FileStyle(
+        FileType.video: FileStyle(
           text: Colors.black,
           background: Colors.red,
           prefix: 'video',
         ),
-        FileType.other: const FileStyle(
+        FileType.other: FileStyle(
           text: Colors.black,
           background: Colors.grey,
           prefix: 'file',

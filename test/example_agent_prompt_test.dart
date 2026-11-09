@@ -111,9 +111,11 @@ void main() {
           example.ComposerDemo(onQuit: () => quitCount++),
         );
         await tester.pump();
-        await tester.enterText('@');
+        // A stable query: `pubspec.yaml` always exists in a Dart package and
+        // matches only itself, whatever directory the demo lists.
+        await tester.enterText('@pubspec');
         await tester.pump();
-        expect(tester.terminalState, containsText('README.md'));
+        expect(tester.terminalState, containsText('pubspec.yaml'));
 
         await tester.sendKeyEvent(
           const KeyboardEvent(logicalKey: LogicalKey.escape),
@@ -122,7 +124,7 @@ void main() {
 
         // The menu is gone but the typed trigger survives, so Escape was
         // consumed by the field rather than quitting the app.
-        expect(tester.terminalState, isNot(containsText('README.md')));
+        expect(tester.terminalState, isNot(containsText('pubspec.yaml')));
         expect(tester.terminalState, containsText('@'));
         expect(quitCount, 0, reason: 'menu was open, so Escape only closed it');
 

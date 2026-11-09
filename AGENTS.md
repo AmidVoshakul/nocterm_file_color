@@ -37,6 +37,9 @@ The approach is a **widget wrapper `FileTextField`** (NOT a fork of Nocterm). Wr
 lib/
   src/
     file_text_field.dart # widget wrapper over TextField
+    file_text_field_suggestion.dart # @/ menu model + kinds + defaults
+    suggestion_menu_style.dart # style of the built-in menu
+    cursor_blink_mixin.dart # shared caret blink for overlay fields
     token_highlight_text_field.dart # coloring-only wrapper over TextField
     token_text.dart # stateless read-only colored token text
     inline_token.dart # immutable {token, FileStyle}
@@ -54,7 +57,7 @@ lib/
 2. `RichText` supports mixed styles via `TextSpan`/`InlineSpan`, but **for display only**, not for editing.
 3. `TextStyle`: fields `color`, `backgroundColor`, `fontWeight`, `fontStyle`, `decoration`, `reverse`; method `toAnsi()`; built-in `Colors` palette; custom via `Color.fromRGB()`/`Color.fromARGB()`.
 4. `TextField.onPaste: bool Function(String)?` - return `true` to intercept the paste yourself.
-5. `TextField.onKeyEvent: bool Function(KeyboardEvent)?` - interception `@`, Ctrl+V, drag&drop.
+5. `TextField.onKeyEvent: bool Function(KeyboardEvent)?` - interception `@`, Ctrl+V.
 6. Nocterm DOES NOT have built-in file/clipboard handling/MIME - it adds a package.
 
 ## Design Rules
@@ -62,7 +65,7 @@ lib/
 - In the label we show **only the name**: `[image 1]`, `[image 2]` for inserted images, `[lib/main.dart]`, `[/home/user/Develop/RustroverProjects/todo/src/main.rs]` for @-mentions.
 - Clicking on the default label opens the file location in the OS; overridden via `onFileClick`.
 - Colors are configured per-type in the application code / config file (Nocterm palette + custom colors).
-- File insertion triggers: copy-paste, @-menu, drag-and-drop, attach button, manual path entry.
+- File insertion triggers: copy-paste, @-menu, programmatic attach, manual path entry. (Nocterm 0.9.0 has no public API for file drops from outside the terminal, so drag-and-drop is NOT supported.)
 - The package does NOT manage the life cycle of files - the application does that; the package just displays the state and returns a list.
 
 ## Build and tests
@@ -72,3 +75,8 @@ dart analyze # static analysis
 dart test # tests
 dart format . # formatting
 ```
+- Coverage: `dart test --coverage=coverage` then `dart run coverage:format_coverage --lcov --in=coverage --out=coverage/lcov.info --packages=.dart_tool/package_config.json --report-on=lib`
+
+## Important constraints
+
+- Core+layout line coverage must stay >=80%.

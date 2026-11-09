@@ -17,6 +17,78 @@ int _inputRow(List<String> lines) {
 
 void main() {
   group('example composer layout', () {
+    test('the demo panel draws section headings', () async {
+      await testNocterm('demo headings', (tester) async {
+        await tester.pumpComponent(const example.ComposerDemo());
+        await tester.pump();
+        await tester.enterText('@');
+        await tester.pump();
+        expect(tester.terminalState, containsText('Files & folders'));
+
+        // Drop into the first folder: the heading gives way to the breadcrumb.
+        var browsed = false;
+        for (var i = 0; i < 10 && !browsed; i++) {
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.arrowDown),
+          );
+          await tester.pump();
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.arrowRight),
+          );
+          await tester.pump();
+          browsed = tester.terminalState.getText().contains('\u2190 back');
+        }
+        expect(browsed, isTrue, reason: 'a folder must open');
+        expect(tester.terminalState, isNot(containsText('Files & folders')));
+      });
+    });
+
+    test('arrow keys browse into a folder and back', () async {
+      await testNocterm('folder browse', (tester) async {
+        await tester.pumpComponent(const example.ComposerDemo());
+        await tester.pump();
+        // Filtering narrows the demo's dynamic list to the agent itself.
+        await tester.enterText('@gen');
+        await tester.pump();
+        expect(tester.terminalState, containsText('@general'));
+
+        // Clear the query so the whole tree is listed again.
+        for (var i = 0; i < 3; i++) {
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.backspace),
+          );
+        }
+        await tester.pump();
+
+        var browsed = false;
+        for (var i = 0; i < 10; i++) {
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.arrowDown),
+          );
+          await tester.pump();
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.arrowRight),
+          );
+          await tester.pump();
+          if (tester.terminalState.getText().contains('← back')) {
+            browsed = true;
+            break;
+          }
+        }
+        expect(browsed, isTrue, reason: 'RightArrow must enter a folder');
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowLeft),
+        );
+        await tester.pump();
+        expect(
+          tester.terminalState.getText().contains('← back'),
+          isFalse,
+          reason: 'LeftArrow must return to the root',
+        );
+      });
+    });
+
     test('composer is pinned to the bottom of the window', () async {
       await testNocterm('bottom-pinned composer', (tester) async {
         await tester.pumpComponent(const example.ComposerDemo());
@@ -46,6 +118,12 @@ void main() {
         await tester.sendKeyEvent(
           const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
         );
+        // Narrow the demo's dynamic provider to a row that always matches.
+        for (final character in 'pubspec'.split('')) {
+          await tester.sendKeyEvent(
+            KeyboardEvent(logicalKey: LogicalKey.keyE, character: character),
+          );
+        }
         await tester.pump();
         await tester.pump();
         final lines = tester.terminalState.getText().split('\n');
@@ -53,7 +131,7 @@ void main() {
         // Menu rows are painted above the field's input row: the last menu
         // row sits above the input.
         final lastMenuRow = lines.lastIndexWhere(
-          (line) => line.contains('test/'),
+          (line) => line.contains('pubspec.yaml'),
         );
         final inputRow = _inputRow(lines);
         expect(lastMenuRow, greaterThan(-1));
@@ -87,12 +165,19 @@ void main() {
         await tester.sendKeyEvent(
           const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
         );
+        for (final character in 'pubspec'.split('')) {
+          await tester.sendKeyEvent(
+            KeyboardEvent(logicalKey: LogicalKey.keyE, character: character),
+          );
+        }
         await tester.pump();
         await tester.pump();
         final lines = tester.terminalState.getText().split('\n');
 
         // Menu rows appear before the input field.
-        final menuRow = lines.indexWhere((line) => line.contains('README.md'));
+        final menuRow = lines.indexWhere(
+          (line) => line.contains('pubspec.yaml'),
+        );
         final inputRow = _inputRow(lines);
         expect(menuRow, greaterThan(-1));
         expect(menuRow, lessThan(inputRow));
@@ -106,6 +191,12 @@ void main() {
         await tester.sendKeyEvent(
           const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
         );
+        // Narrow the demo's dynamic provider to a row that always matches.
+        for (final character in 'pubspec'.split('')) {
+          await tester.sendKeyEvent(
+            KeyboardEvent(logicalKey: LogicalKey.keyE, character: character),
+          );
+        }
         await tester.pump();
         await tester.pump();
         final lines = tester.terminalState.getText().split('\n');
@@ -115,7 +206,7 @@ void main() {
         const promptBorder = Colors.yellow;
 
         final lastMenuRow = lines.lastIndexWhere(
-          (line) => line.contains('test/'),
+          (line) => line.contains('pubspec.yaml'),
         );
         final inputRow = _inputRow(lines);
         expect(lastMenuRow, greaterThan(-1));
