@@ -21,6 +21,8 @@ The approach is a **widget wrapper `FileTextField`** (NOT a fork of Nocterm). Wr
 - `FileDetector` - determining the file type by extension → `detectType(extension)`.
 - `FileInfo` - model: `path`, `name`, `extension`, `type`, `size`.
 - `FileOpener` - cross-platform opening of a file location in the OS (`xdg-open`/`open`/`explorer`).
+- `FileSystemCache` - LRU+TTL directory listings with a batched tree walk.
+- `TerminalColors` - `NO_COLOR` support shared by the package's colour output.
 
 ### State Management
 - `getAttachedFiles(): List<FileInfo>` - current state (called before sending to the model).
@@ -37,6 +39,8 @@ The approach is a **widget wrapper `FileTextField`** (NOT a fork of Nocterm). Wr
 lib/
   src/
     file_text_field.dart # widget wrapper over TextField
+    file_system_cache.dart # LRU directory listings + batched tree walk
+    terminal_colors.dart # NO_COLOR support for the package's colours
     file_text_field_suggestion.dart # @/ menu model + kinds + defaults
     suggestion_menu_style.dart # style of the built-in menu
     cursor_blink_mixin.dart # shared caret blink for overlay fields

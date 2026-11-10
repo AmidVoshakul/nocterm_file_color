@@ -7,6 +7,7 @@ import 'file_opener.dart';
 import 'file_tag.dart';
 import 'file_text_field_suggestion.dart';
 import 'suggestion_grouping.dart';
+import 'terminal_colors.dart';
 import 'suggestion_menu_style.dart';
 import 'inline_token.dart';
 import 'token_spans.dart';
@@ -367,16 +368,38 @@ class FileTextFieldState extends State<FileTextField>
   /// Adds a file to the attachment list and inserts its token into the text.
   void attachFile(FileInfo file, {FileStyle? style}) {
     setState(() {
-      final fileStyle = style ?? _styleFor(file);
-      if (file.type == FileType.image) {
-        file = file.copyWith(
-          name: '${fileStyle.prefix ?? 'image'} ${_nextImageIndex(fileStyle)}',
-        );
-      }
-      _attachedFiles.add(file);
-      _insertToken(file, style: fileStyle);
+      _attachFiles([file], style: style);
       _notifyFilesChanged();
     });
+  }
+
+  /// Adds every path in [paths] in one rebuild — the string form of
+  /// [attachFiles], mirroring [attachFilePath].
+  void attachFilePaths(List<String> paths, {FileStyle? style}) =>
+      attachFiles(paths.map(FileInfo.fromPath).toList(), style: style);
+
+  /// Adds every file in [files] in one rebuild, so a batch costs a single
+  /// repaint instead of one per file. An empty batch is a no-op.
+  void attachFiles(List<FileInfo> files, {FileStyle? style}) {
+    if (files.isEmpty) return;
+    setState(() {
+      _attachFiles(files, style: style);
+      _notifyFilesChanged();
+    });
+  }
+
+  void _attachFiles(List<FileInfo> files, {FileStyle? style}) {
+    for (final file in files) {
+      final fileStyle = style ?? _styleFor(file);
+      final named = file.type == FileType.image
+          ? file.copyWith(
+              name:
+                  '${fileStyle.prefix ?? 'image'} ${_nextImageIndex(fileStyle)}',
+            )
+          : file;
+      _attachedFiles.add(named);
+      _insertToken(named, style: fileStyle);
+    }
   }
 
   /// The lowest image label number not yet taken by an attached image.
@@ -520,8 +543,11 @@ class FileTextFieldState extends State<FileTextField>
   /// [FileTextField.suggestionPageSize]).
   int get suggestionPageSize => component.suggestionPageSize;
 
-  /// Visual style for the built-in suggestion menu.
-  SuggestionMenuStyle get suggestionMenuStyle => component.suggestionMenuStyle;
+  /// Visual style for the built-in suggestion menu, with `NO_COLOR` already
+  /// applied — the same style the built-in menu renders with, so a host-drawn
+  /// menu honours the same rule.
+  SuggestionMenuStyle get suggestionMenuStyle =>
+      component.suggestionMenuStyle.resolve();
 
   /// Moves the highlighted suggestion by [delta] rows, applying the configured
   /// cyclic/linear policy and scroll threshold. Intended for host-rendered
@@ -786,9 +812,7 @@ class FileTextFieldState extends State<FileTextField>
   bool _handlePaste(String pastedText) {
     final paths = _extractPaths(pastedText);
     if (paths.isNotEmpty) {
-      for (final path in paths) {
-        attachFile(FileInfo.fromPath(path));
-      }
+      attachFilePaths(paths);
       return true; // Handled
     }
 
@@ -1351,10 +1375,10 @@ class FileTextFieldState extends State<FileTextField>
       onPaste: _handlePaste,
       onKeyEvent: _handleKeyEvent,
       enabled: component.enabled,
-      cursorColor: component.cursorColor,
+      cursorColor: TerminalColors.resolve(component.cursorColor),
       cursorStyle: component.cursorStyle,
       cursorBlinkRate: component.cursorBlinkRate,
-      selectionColor: component.selectionColor,
+      selectionColor: TerminalColors.resolve(component.selectionColor),
       showCursor: showInlineTags ? false : component.showCursor,
       width: component.width,
       height: component.height,
@@ -1364,7 +1388,11 @@ class FileTextFieldState extends State<FileTextField>
     if (showInlineTags) {
       final text = _controller.text;
       final selection = _controller.selection;
-      final cursorColor = component.cursorColor ?? TuiTheme.of(context).primary;
+      // The overlay draws the package's own caret and selection, so both go
+      // through the colour probe like every other colour the package emits.
+      final cursorColor = TerminalColors.resolve(
+        component.cursorColor ?? TuiTheme.of(context).primary,
+      );
       input = Stack(
         children: [
           textField,
@@ -1391,7 +1419,8 @@ class FileTextFieldState extends State<FileTextField>
                   cursorColor: cursorColor,
                   baseStyle: component.style ?? const TextStyle(),
                   selectionColor:
-                      component.selectionColor ?? cursorColor.withOpacity(0.4),
+                      TerminalColors.resolve(component.selectionColor) ??
+                      cursorColor?.withOpacity(0.4),
                   cursorStyle: component.cursorStyle,
                 ),
               ),
@@ -1434,7 +1463,8 @@ class FileTextFieldState extends State<FileTextField>
   Component _buildDefaultSuggestionMenu(
     List<FileTextFieldSuggestion> suggestions,
   ) {
-    final style = component.suggestionMenuStyle;
+    // One place applies NO_COLOR to the menu.
+    final style = component.suggestionMenuStyle.resolve();
     final pageSize = suggestions.isEmpty
         ? 1
         : _effectiveSuggestionPageSize(suggestions.length);
@@ -1481,14 +1511,25 @@ class FileTextFieldState extends State<FileTextField>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: suggestions.isEmpty
-              ? [const Text('No matches', style: TextStyle(color: Colors.gray))]
+              ? [
+                  Text(
+                    'No matches',
+                    style: TextStyle(
+                      color:
+                          style.groupHeaderTextColor ??
+                          TerminalColors.resolve(Colors.gray),
+                    ),
+                  ),
+                ]
               : [
                   for (final row in rows) ...[
                     if (row.heading != null)
                       Text(
                         row.heading!,
                         style: TextStyle(
-                          color: style.groupHeaderTextColor ?? Colors.gray,
+                          color:
+                              style.groupHeaderTextColor ??
+                              TerminalColors.resolve(Colors.gray),
                           backgroundColor: style.groupHeaderBackgroundColor,
                         ),
                       ),
@@ -1546,9 +1587,9 @@ class FileTextFieldState extends State<FileTextField>
     required String label,
     required String query,
     required bool selected,
-    required Color selectedTextColor,
-    required Color itemTextColor,
-    required Color highlightMarkerColor,
+    required Color? selectedTextColor,
+    required Color? itemTextColor,
+    required Color? highlightMarkerColor,
   }) {
     final baseColor = selected ? selectedTextColor : itemTextColor;
     final baseStyle = TextStyle(color: baseColor);

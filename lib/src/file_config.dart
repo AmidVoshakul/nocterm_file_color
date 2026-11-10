@@ -1,5 +1,7 @@
 import 'package:nocterm/nocterm.dart';
 
+import 'terminal_colors.dart';
+
 import 'file_detector.dart';
 import 'file_info.dart';
 
@@ -78,8 +80,8 @@ class FileStyle {
   /// Converts this style into a Nocterm [TextStyle].
   TextStyle toTextStyle() {
     return TextStyle(
-      color: text,
-      backgroundColor: background,
+      color: TerminalColors.resolve(text),
+      backgroundColor: TerminalColors.resolve(background),
       fontWeight: bold ? FontWeight.bold : null,
       fontStyle: italic ? FontStyle.italic : null,
       decoration: underline ? TextDecoration.underline : null,

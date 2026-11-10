@@ -3,6 +3,7 @@ import 'package:nocterm/nocterm.dart';
 import 'inline_token.dart';
 import 'token_spans.dart';
 import 'cursor_blink_mixin.dart';
+import 'terminal_colors.dart';
 
 /// A [TextField] wrapper that colors arbitrary inline tokens.
 ///
@@ -196,10 +197,10 @@ class _TokenHighlightTextFieldState extends State<TokenHighlightTextField>
       onEditingComplete: component.onEditingComplete,
       onSubmitted: component.onSubmitted,
       enabled: component.enabled,
-      cursorColor: component.cursorColor,
+      cursorColor: TerminalColors.resolve(component.cursorColor),
       cursorStyle: component.cursorStyle,
       cursorBlinkRate: component.cursorBlinkRate,
-      selectionColor: component.selectionColor,
+      selectionColor: TerminalColors.resolve(component.selectionColor),
       showCursor: showInlineTokens ? false : component.showCursor,
       width: component.width,
       height: component.height,
@@ -209,10 +210,15 @@ class _TokenHighlightTextFieldState extends State<TokenHighlightTextField>
     if (showInlineTokens) {
       final text = _controller.text;
       final selection = _controller.selection;
-      final cursorColor = component.cursorColor ?? TuiTheme.of(context).primary;
+      // The overlay draws the package's own caret and selection, so both go
+      // through the colour probe like every other colour the package emits.
+      final cursorColor = TerminalColors.resolve(
+        component.cursorColor ?? TuiTheme.of(context).primary,
+      );
       final baseStyle = component.style ?? const TextStyle();
       final selectionColor =
-          component.selectionColor ?? cursorColor.withOpacity(0.4);
+          TerminalColors.resolve(component.selectionColor) ??
+          cursorColor?.withOpacity(0.4);
       final cursorOffset =
           component.focused && component.showCursor && cursorVisible
           ? selection.extentOffset.clamp(0, text.length)

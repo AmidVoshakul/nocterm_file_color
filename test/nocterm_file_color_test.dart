@@ -2010,6 +2010,47 @@ void main() {
       ClipboardManager.clear();
     });
 
+    test('pasting several paths attaches them in one batch', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+      var notifications = 0;
+      final sizes = <int>[];
+
+      await testNocterm('paste batch notifications', (tester) async {
+        ClipboardManager.copy('/tmp/a.txt\n/tmp/b.txt\n/tmp/c.txt');
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 60,
+            height: 3,
+            onFilesChanged: (files) {
+              notifications++;
+              sizes.add(files.length);
+            },
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+
+        expect(key.currentState!.getAttachedFiles(), hasLength(3));
+        expect(
+          notifications,
+          1,
+          reason: 'a batch is one notification, not one per file',
+        );
+        expect(sizes, [3], reason: 'a host never sees a partial batch');
+      });
+
+      ClipboardManager.clear();
+      controller.dispose();
+    });
+
     test('a pasted path containing a space stays whole', () async {
       final controller = TextEditingController();
       final key = GlobalKey<FileTextFieldState>();
@@ -2040,6 +2081,124 @@ void main() {
       });
 
       ClipboardManager.clear();
+      controller.dispose();
+    });
+
+    test('attachFilePaths attaches by path strings', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('batch paths', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+          ),
+        );
+        key.currentState!.attachFilePaths(['/tmp/a.txt', '/tmp/b.txt']);
+        await tester.pump();
+
+        expect(key.currentState!.getAttachedFiles().map((file) => file.name), [
+          'a.txt',
+          'b.txt',
+        ]);
+        expect(controller.text, '[a.txt] [b.txt] ');
+      });
+
+      controller.dispose();
+    });
+
+    test('an empty batch keeps the field untouched', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+      var notifications = 0;
+
+      await testNocterm('empty batch', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onFilesChanged: (_) => notifications++,
+          ),
+        );
+        key.currentState!.attachFiles(const []);
+        await tester.pump();
+
+        expect(controller.text, '');
+        expect(notifications, 0);
+      });
+
+      controller.dispose();
+    });
+
+    test('a batch numbers its images without gaps', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('batch images', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+          ),
+        );
+        key.currentState!.attachFiles([
+          FileInfo.fromPath('/tmp/1.png'),
+          FileInfo.fromPath('/tmp/2.png'),
+          FileInfo.fromPath('/tmp/3.png'),
+        ]);
+        await tester.pump();
+
+        expect(key.currentState!.getAttachedFiles().map((file) => file.name), [
+          'image 1',
+          'image 2',
+          'image 3',
+        ]);
+        expect(controller.text, '[image 1] [image 2] [image 3] ');
+      });
+
+      controller.dispose();
+    });
+
+    test('attachFiles inserts the batch in one rebuild', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+      var notifications = 0;
+
+      await testNocterm('batch attach', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onFilesChanged: (_) => notifications++,
+          ),
+        );
+        key.currentState!.attachFiles([
+          FileInfo.fromPath('/tmp/a.txt'),
+          FileInfo.fromPath('/tmp/b.txt'),
+        ]);
+        await tester.pump();
+
+        expect(key.currentState!.getAttachedFiles().map((file) => file.name), [
+          'a.txt',
+          'b.txt',
+        ]);
+        expect(controller.text, '[a.txt] [b.txt] ');
+        expect(notifications, 1, reason: 'one notification for the batch');
+      });
+
       controller.dispose();
     });
 
@@ -4670,6 +4829,113 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
 
         expect(tester.terminalState, containsText('hello world'));
         expect(tester.terminalState.getCellAt(0, 0)?.style.color, isNull);
+      });
+
+      controller.dispose();
+    });
+
+    test('a host selection color stops with NO_COLOR', () async {
+      final controller = TextEditingController();
+      addTearDown(() => TerminalColors.setNoColorOverride(null));
+
+      await testNocterm('monochrome host selection', (tester) async {
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: controller,
+            focused: true,
+            width: 30,
+            height: 1,
+            selectionColor: Colors.brightRed,
+            tokens: const [
+              InlineToken(
+                token: '@x',
+                style: FileStyle(text: Colors.brightCyan),
+              ),
+            ],
+          ),
+        );
+        controller.text = 'use @x now';
+        controller.selection = const TextSelection(
+          baseOffset: 4,
+          extentOffset: 6,
+        );
+        await tester.pump();
+
+        expect(
+          tester.terminalState.getCellAt(4, 0)?.style.backgroundColor,
+          Colors.brightRed,
+          reason: 'the host color paints while colors are on',
+        );
+
+        TerminalColors.setNoColorOverride(true);
+        // An extent move rebuilds the overlay with the flag on.
+        controller.selection = const TextSelection(
+          baseOffset: 4,
+          extentOffset: 7,
+        );
+        await tester.pump();
+
+        expect(
+          tester.terminalState.getCellAt(4, 0)?.style.backgroundColor,
+          isNot(Colors.brightRed),
+          reason: 'a host-supplied selection color must not survive NO_COLOR',
+        );
+      });
+
+      controller.dispose();
+    });
+
+    test('tokens and caret drop their colors when colors are off', () async {
+      final controller = TextEditingController();
+      addTearDown(() => TerminalColors.setNoColorOverride(null));
+
+      await testNocterm('monochrome highlight', (tester) async {
+        await tester.pumpComponent(
+          TokenHighlightTextField(
+            controller: controller,
+            focused: true,
+            width: 30,
+            height: 1,
+            tokens: [
+              const InlineToken(
+                token: '@explore',
+                style: FileStyle(text: Colors.brightCyan),
+              ),
+            ],
+          ),
+        );
+        controller.text = 'use @explore now';
+        await tester.pump();
+
+        expect(
+          tester.terminalState.getCellAt(4, 0)?.style.color,
+          Colors.brightCyan,
+        );
+        // The caret sits past the last character and paints the cell.
+        final caretFill = tester.terminalState
+            .getCellAt(16, 0)
+            ?.style
+            .backgroundColor;
+        expect(caretFill, isNotNull, reason: 'the emulated caret paints');
+
+        TerminalColors.setNoColorOverride(true);
+        // A text change rebuilds the overlay with the flag on; the caret is
+        // placed back on the same cell, so what is observed is its fill under
+        // NO_COLOR and not a plain cell the caret happened to leave.
+        controller.text = 'use @explore now!';
+        controller.selection = const TextSelection.collapsed(offset: 16);
+        await tester.pump();
+
+        expect(
+          tester.terminalState.getCellAt(4, 0)?.style.color,
+          isNot(Colors.brightCyan),
+          reason: 'NO_COLOR must leave the token uncolored',
+        );
+        expect(
+          tester.terminalState.getCellAt(16, 0)?.style.backgroundColor,
+          isNull,
+          reason: 'the overlay caret fill must not survive NO_COLOR',
+        );
       });
 
       controller.dispose();

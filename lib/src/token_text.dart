@@ -1,6 +1,7 @@
 import 'package:nocterm/nocterm.dart';
 
 import 'inline_token.dart';
+import 'terminal_colors.dart';
 import 'token_spans.dart';
 
 /// Renders a plain [String] with arbitrary inline tokens colored.
@@ -61,9 +62,9 @@ class TokenText extends StatelessComponent {
             selectionStart: 0,
             selectionEnd: 0,
             cursorOffset: null,
-            cursorColor: Colors.black,
+            cursorColor: TerminalColors.resolve(Colors.black),
             baseStyle: baseStyle,
-            selectionColor: Colors.black,
+            selectionColor: TerminalColors.resolve(Colors.black),
             cursorStyle: CursorStyle.block,
           ),
         ),

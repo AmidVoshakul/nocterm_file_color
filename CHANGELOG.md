@@ -1,3 +1,26 @@
+## 0.0.6
+
+### Features
+
+- **`FileSystemCache`**: LRU memory with a TTL for directory listings, so a menu that rebuilds on every keystroke lists a directory once instead of once per character. A non-positive `maxEntries` or a negative `ttl` is rejected instead of silently disabling the cache. The source is injectable, and `batches(dir)` walks a tree depth first as a stream, visiting every directory once by its resolved path so a symlink cycle terminates.
+- **`FileTextFieldState.attachFiles(List<FileInfo>)`** and **`attachFilePaths(List<String>)`**: attach a batch in one rebuild, so a folder of files costs a single repaint and a single `onFilesChanged`. An empty batch is a no-op.
+- **`NO_COLOR`**: `TerminalColors` honours the environment variable — when it is present and non-empty, every colour the package emits stops: file and token tags, the suggestion menu, and the caret and selection the inline overlays draw, all fall back to the terminal defaults, while Nocterm's own colours belong to the framework and stay. Overridable through `TerminalColors.setNoColorOverride`, and colors can be probed with `TerminalColors.resolve`.
+
+### Fixes
+
+- Pasting several paths at once now attaches them in a single rebuild with a single `onFilesChanged` notification, instead of one notification per file.
+
+### Breaking
+
+- `SuggestionMenuStyle` colour fields (`selectedBackgroundColor`,
+  `selectedTextColor`, `itemTextColor`) are now `Color?`. Assignments that
+  require a non-nullable `Color` need a non-null assertion or a fallback;
+  the defaults are unchanged.
+
+### Refactor
+
+- `SuggestionMenuStyle` colours are nullable, which lets `resolve()` drop every colour at once. `NO_COLOR` clears colours and the gray border, while padding and the highlight marker keep their configured values; Nocterm's own caret and selection colours belong to the framework and stay.
+
 ## 0.0.5
 
 ### Features

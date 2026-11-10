@@ -1,11 +1,14 @@
-# **Nocterm File Color** - A Nocterm `TextField` wrapper that displays attached files and colored tokens inline in the input line.
+# Nocterm File Color
 
-[![Coverage](https://img.shields.io/badge/coverage-95.4%25-brightgreen)](https://github.com/zoocityboy/nocterm_bloc/actions)
+[![Coverage](https://img.shields.io/badge/coverage-95.3%25-brightgreen)](https://github.com/AmidVoshakul/nocterm_file_color/actions)
 [![Pub Version](https://img.shields.io/pub/v/nocterm_file_color)](https://pub.dev/packages/nocterm_file_color)
 [![pub points](https://img.shields.io/pub/points/nocterm_file_color?logo=dart)](https://pub.dev/packages/nocterm_file_color/score)
 [![Pub Monthly Downloads](https://img.shields.io/pub/dm/nocterm_file_color?logo=dart&color=yellow)](https://pub.dev/packages/nocterm_file_color/score)
 [![Dart](https://img.shields.io/badge/Dart-0175C2?logo=dart)](https://dart.dev)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+A Nocterm `TextField` wrapper that displays attached files and colored tokens
+inline in the input line.
 
 ![A composer prompt with colored inline tokens: a pasted file and an agent
 mention shown as colored tags, plus the agent and model line below the

@@ -54,6 +54,10 @@ class _ComposerDemoState extends State<ComposerDemo> {
 
   final _controller = TextEditingController();
 
+  /// Directory listings live here: the provider runs on every keystroke, so
+  /// each directory is listed once and reused within the TTL.
+  final _directoryCache = FileSystemCache();
+
   /// Reaches the menu state the demo renders itself; see [_buildMenuPanel].
   final _fieldKey = GlobalKey<FileTextFieldState>();
 
@@ -143,7 +147,7 @@ class _ComposerDemoState extends State<ComposerDemo> {
             : Directory('${root.path}${Platform.pathSeparator}$basePath');
         if (!targetDir.existsSync()) return suggestions;
         const folderStyle = FileStyle(background: Colors.yellow, bold: true);
-        for (final entity in targetDir.listSync(recursive: false)) {
+        for (final entity in _directoryCache.children(targetDir)) {
           final relPath = entity.path
               .replaceFirst(root.path + Platform.pathSeparator, '')
               .replaceAll(Platform.pathSeparator, '/');

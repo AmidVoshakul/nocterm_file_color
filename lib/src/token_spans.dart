@@ -3,6 +3,7 @@ import 'package:nocterm/nocterm.dart';
 
 import 'file_config.dart';
 import 'inline_token.dart';
+import 'terminal_colors.dart';
 
 /// Builds inline spans for [text], coloring the text occurrences matched by
 /// [tokens] with their [FileStyle]. Each [InlineToken] entry colors exactly
@@ -19,9 +20,9 @@ List<InlineSpan> buildInlineSpans({
   required int selectionStart,
   required int selectionEnd,
   required int? cursorOffset,
-  required Color cursorColor,
+  required Color? cursorColor,
   required TextStyle baseStyle,
-  required Color selectionColor,
+  required Color? selectionColor,
   required CursorStyle cursorStyle,
 }) {
   final attachments = tokens
@@ -112,9 +113,9 @@ void _appendStyledText(
   TextStyle baseStyle,
   int selectionStart,
   int selectionEnd,
-  Color selectionColor,
+  Color? selectionColor,
   int? cursorOffset,
-  Color cursorColor,
+  Color? cursorColor,
   CursorStyle cursorStyle,
 ) {
   var offset = startOffset;
@@ -122,7 +123,10 @@ void _appendStyledText(
     final selected =
         selectionStart < offset + grapheme.length && selectionEnd > offset;
     final style = selected
-        ? baseStyle.copyWith(backgroundColor: selectionColor)
+        ? baseStyle.copyWith(
+            backgroundColor:
+                selectionColor ?? TerminalColors.resolve(Colors.grey),
+          )
         : baseStyle;
     final displayStyle = cursorOffset == offset
         ? _cursorTextStyle(style, cursorColor, cursorStyle)
@@ -134,12 +138,12 @@ void _appendStyledText(
 
 TextStyle _cursorTextStyle(
   TextStyle style,
-  Color cursorColor,
+  Color? cursorColor,
   CursorStyle cursorStyle,
 ) {
   if (cursorStyle == CursorStyle.underline) {
     return TextStyle(
-      color: style.color ?? Colors.white,
+      color: style.color ?? TerminalColors.resolve(Colors.white),
       backgroundColor: style.backgroundColor,
       fontWeight: style.fontWeight,
       decoration: TextDecoration.underline,
@@ -147,5 +151,17 @@ TextStyle _cursorTextStyle(
   }
   // Block and block-outline cursors match Nocterm's own field cursor: dark
   // glyph over the caret color.
-  return TextStyle(color: Colors.black, backgroundColor: cursorColor);
+  if (cursorColor == null) {
+    // No caret colour resolves — NO_COLOR. Reverse video keeps the caret
+    // visible without emitting a colour.
+    return TextStyle(
+      color: style.color,
+      backgroundColor: style.backgroundColor,
+      reverse: true,
+    );
+  }
+  return TextStyle(
+    color: TerminalColors.resolve(Colors.black),
+    backgroundColor: cursorColor,
+  );
 }

@@ -1,5 +1,7 @@
 import 'package:nocterm/nocterm.dart';
 
+import 'terminal_colors.dart';
+
 /// Visual style for the built-in `@`/`/` suggestion menu rendered by
 /// [FileTextField].
 ///
@@ -39,13 +41,13 @@ class SuggestionMenuStyle {
   final BoxBorder? border;
 
   /// Background color of the highlighted row.
-  final Color selectedBackgroundColor;
+  final Color? selectedBackgroundColor;
 
   /// Text color of the highlighted row.
-  final Color selectedTextColor;
+  final Color? selectedTextColor;
 
   /// Text color of non-highlighted rows.
-  final Color itemTextColor;
+  final Color? itemTextColor;
 
   /// Text color for the optional description column (host-rendered menus).
   final Color? descriptionColor;
@@ -65,6 +67,26 @@ class SuggestionMenuStyle {
 
   /// Inner padding of the menu panel. `EdgeInsets.zero` removes padding.
   final EdgeInsets padding;
+
+  /// This style without colours when the terminal asked for no colour; the
+  /// layout attributes survive. Applies `NO_COLOR` in one place, so the menu
+  /// builder never branches on it.
+  SuggestionMenuStyle resolve() {
+    if (!TerminalColors.noColorEnabled) return this;
+    return SuggestionMenuStyle(
+      border: null,
+      backgroundColor: null,
+      selectedBackgroundColor: null,
+      selectedTextColor: null,
+      itemTextColor: null,
+      descriptionColor: null,
+      highlightMarkerColor: null,
+      groupHeaderTextColor: null,
+      groupHeaderBackgroundColor: null,
+      highlightMarker: highlightMarker,
+      padding: padding,
+    );
+  }
 
   SuggestionMenuStyle copyWith({
     Color? backgroundColor,
@@ -90,6 +112,9 @@ class SuggestionMenuStyle {
       descriptionColor: descriptionColor ?? this.descriptionColor,
       highlightMarker: highlightMarker ?? this.highlightMarker,
       highlightMarkerColor: highlightMarkerColor ?? this.highlightMarkerColor,
+      groupHeaderTextColor: groupHeaderTextColor ?? this.groupHeaderTextColor,
+      groupHeaderBackgroundColor:
+          groupHeaderBackgroundColor ?? this.groupHeaderBackgroundColor,
       padding: padding ?? this.padding,
     );
   }
@@ -106,6 +131,8 @@ class SuggestionMenuStyle {
         other.descriptionColor == descriptionColor &&
         other.highlightMarker == highlightMarker &&
         other.highlightMarkerColor == highlightMarkerColor &&
+        other.groupHeaderTextColor == groupHeaderTextColor &&
+        other.groupHeaderBackgroundColor == groupHeaderBackgroundColor &&
         other.padding == padding;
   }
 
@@ -119,6 +146,8 @@ class SuggestionMenuStyle {
     descriptionColor,
     highlightMarker,
     highlightMarkerColor,
+    groupHeaderTextColor,
+    groupHeaderBackgroundColor,
     padding,
   );
 }
