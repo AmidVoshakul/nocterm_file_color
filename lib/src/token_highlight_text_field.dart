@@ -4,6 +4,7 @@ import 'inline_token.dart';
 import 'token_spans.dart';
 import 'cursor_blink_mixin.dart';
 import 'terminal_colors.dart';
+import 'text_viewport.dart';
 
 /// A [TextField] wrapper that colors arbitrary inline tokens.
 ///
@@ -45,6 +46,7 @@ class TokenHighlightTextField extends StatefulComponent {
     this.obscuringCharacter = '•',
     this.maxLines = 1,
     this.minLines,
+    this.maxLinesVisible = 8,
     this.maxLength,
     this.onChanged,
     this.onEditingComplete,
@@ -60,6 +62,7 @@ class TokenHighlightTextField extends StatefulComponent {
     this.tokens = const [],
   }) : assert(maxLines == null || maxLines > 0),
        assert(minLines == null || minLines > 0),
+       assert(maxLinesVisible > 0, 'maxLinesVisible must be greater than 0'),
        assert(
          (maxLines == null) || (minLines == null) || (maxLines >= minLines),
          "minLines can't be greater than maxLines",
@@ -84,6 +87,16 @@ class TokenHighlightTextField extends StatefulComponent {
   final String obscuringCharacter;
   final int? maxLines;
   final int? minLines;
+
+  /// How many rows the input grows to before it scrolls.
+  ///
+  /// The field starts at a single row and grows with its content up to this
+  /// many rows; beyond that the text scrolls and the caret is kept in view,
+  /// so the field never grows without bound and breaks the surrounding
+  /// layout. Only applies while [height] is unset — an explicit [height]
+  /// governs the box instead.
+  final int maxLinesVisible;
+
   final int? maxLength;
   final ValueChanged<String>? onChanged;
   final VoidCallback? onEditingComplete;
@@ -108,7 +121,9 @@ class TokenHighlightTextField extends StatefulComponent {
 }
 
 class _TokenHighlightTextFieldState extends State<TokenHighlightTextField>
-    with CursorBlinkMixin<TokenHighlightTextField> {
+    with
+        CursorBlinkMixin<TokenHighlightTextField>,
+        TextViewportMixin<TokenHighlightTextField> {
   late TextEditingController _controller;
   bool _controllerIsInternal = false;
 
@@ -146,6 +161,7 @@ class _TokenHighlightTextFieldState extends State<TokenHighlightTextField>
       _controller = component.controller ?? TextEditingController();
       _controller.addListener(_handleControllerChanged);
       _syncCursorBlink();
+      placeCaretInView();
     }
     _syncCursorBlink();
   }
@@ -156,6 +172,31 @@ class _TokenHighlightTextFieldState extends State<TokenHighlightTextField>
     // repaints the transparent overlay.
     _syncCursorBlink();
     setState(() {});
+    placeCaretInView();
+    resetViewportTargetColumn();
+  }
+
+  @override
+  String get viewportText => _controller.text;
+
+  @override
+  TextSelection get viewportSelection => _controller.selection;
+
+  @override
+  set viewportSelection(TextSelection selection) =>
+      _controller.selection = selection;
+
+  @override
+  int get viewportMaxLinesVisible => component.maxLinesVisible;
+
+  @override
+  bool get viewportFocused => component.focused;
+
+  /// The boundary rows act like Home and End; mid-text arrows stay with
+  /// Nocterm's own caret movement.
+  bool _handleKeyEvent(KeyboardEvent event) {
+    if (component.maxLines == 1) return false;
+    return viewportHandleBoundaryArrow(event);
   }
 
   void _syncCursorBlink() {
@@ -174,11 +215,25 @@ class _TokenHighlightTextFieldState extends State<TokenHighlightTextField>
   Component build(BuildContext context) {
     final showInlineTokens =
         component.tokens.isNotEmpty && !component.obscureText;
-    final textField = TextField(
+    // An explicit height governs the box; without one the field sizes
+    // itself, and maxLinesVisible caps the growth.
+    return component.height == null
+        ? _buildViewportInput(showInlineTokens)
+        : _buildFixedInput(showInlineTokens);
+  }
+
+  /// The inner field, shared by both input layouts.
+  TextField _buildInnerTextField({
+    required bool showInlineTokens,
+    required double? width,
+    required double? height,
+    required InputDecoration? decoration,
+  }) {
+    return TextField(
       controller: _controller,
       focused: component.focused,
       onFocusChange: component.onFocusChange,
-      decoration: component.decoration,
+      decoration: decoration,
       style: showInlineTokens
           ? (component.style ?? const TextStyle()).copyWith(
               color: const Color.fromARGB(0, 0, 0, 0),
@@ -194,6 +249,7 @@ class _TokenHighlightTextFieldState extends State<TokenHighlightTextField>
       minLines: component.minLines,
       maxLength: component.maxLength,
       onChanged: component.onChanged,
+      onKeyEvent: _handleKeyEvent,
       onEditingComplete: component.onEditingComplete,
       onSubmitted: component.onSubmitted,
       enabled: component.enabled,
@@ -202,54 +258,95 @@ class _TokenHighlightTextFieldState extends State<TokenHighlightTextField>
       cursorBlinkRate: component.cursorBlinkRate,
       selectionColor: TerminalColors.resolve(component.selectionColor),
       showCursor: showInlineTokens ? false : component.showCursor,
+      width: width,
+      height: height,
+    );
+  }
+
+  /// The layout for a host that sized the field itself.
+  Component _buildFixedInput(bool showInlineTokens) {
+    final textField = _buildInnerTextField(
+      showInlineTokens: showInlineTokens,
       width: component.width,
       height: component.height,
+      decoration: component.decoration,
     );
+    if (!showInlineTokens) return textField;
+    return Stack(
+      children: [
+        textField,
+        if (component.width != null)
+          SizedBox(width: component.width! - 1, child: _buildOverlayRichText())
+        else
+          _buildOverlayRichText(),
+      ],
+    );
+  }
 
-    Component input = textField;
-    if (showInlineTokens) {
-      final text = _controller.text;
-      final selection = _controller.selection;
-      // The overlay draws the package's own caret and selection, so both go
-      // through the colour probe like every other colour the package emits.
-      final cursorColor = TerminalColors.resolve(
-        component.cursorColor ?? TuiTheme.of(context).primary,
-      );
-      final baseStyle = component.style ?? const TextStyle();
-      final selectionColor =
-          TerminalColors.resolve(component.selectionColor) ??
-          cursorColor?.withOpacity(0.4);
-      final cursorOffset =
-          component.focused && component.showCursor && cursorVisible
-          ? selection.extentOffset.clamp(0, text.length)
-          : null;
-
-      input = Stack(
-        children: [
-          textField,
-          RichText(
-            text: TextSpan(
-              children: buildInlineSpans(
-                text: text,
-                tokens: component.tokens,
-                selectionStart: selection.start.clamp(0, text.length),
-                selectionEnd: selection.end.clamp(0, text.length),
-                cursorOffset: cursorOffset,
-                cursorColor: cursorColor,
-                baseStyle: baseStyle,
-                selectionColor: selectionColor,
-                cursorStyle: component.cursorStyle,
-              ),
-            ),
-            textAlign: component.textAlign,
-            softWrap: component.maxLines != 1,
-            overflow: TextOverflow.clip,
-            maxLines: component.maxLines,
+  /// The self-sizing layout: the field and its overlay scroll together inside
+  /// a box capped at [maxLinesVisible] rows. The box itself comes from
+  /// [TextViewportMixin]; here only the two layers are built.
+  Component _buildViewportInput(bool showInlineTokens) {
+    return buildViewportBox(
+      width: component.width,
+      decoration: component.decoration,
+      focused: component.focused,
+      maxLines: component.maxLines,
+      layers: (fieldWidth, textWidth) {
+        final overlay = showInlineTokens ? _buildOverlayRichText() : null;
+        return (
+          _buildInnerTextField(
+            showInlineTokens: showInlineTokens,
+            width: fieldWidth,
+            height: null,
+            decoration: null,
           ),
-        ],
-      );
-    }
+          overlay,
+        );
+      },
+    );
+  }
 
-    return input;
+  /// The colored overlay, shared by both layouts.
+  RichText _buildOverlayRichText() {
+    final text = _controller.text;
+    final selection = _controller.selection;
+    // The overlay draws the package's own caret and selection, so both go
+    // through the colour probe like every other colour the package emits.
+    final cursorColor = TerminalColors.resolve(
+      component.cursorColor ?? TuiTheme.of(context).primary,
+    );
+    final baseStyle = component.style ?? const TextStyle();
+    final selectionColor =
+        TerminalColors.resolve(component.selectionColor) ??
+        cursorColor?.withOpacity(0.4);
+    final cursorOffset =
+        component.focused && component.showCursor && cursorVisible
+        ? selection.extentOffset.clamp(0, text.length)
+        : null;
+
+    return RichText(
+      // The key rides the paragraph: Nocterm's element exposes a render
+      // object only on render object elements, and the tap origin is
+      // measured from this box.
+      key: viewportOverlayKey,
+      text: TextSpan(
+        children: buildInlineSpans(
+          text: text,
+          tokens: component.tokens,
+          selectionStart: selection.start.clamp(0, text.length),
+          selectionEnd: selection.end.clamp(0, text.length),
+          cursorOffset: cursorOffset,
+          cursorColor: cursorColor,
+          baseStyle: baseStyle,
+          selectionColor: selectionColor,
+          cursorStyle: component.cursorStyle,
+        ),
+      ),
+      textAlign: component.textAlign,
+      softWrap: component.maxLines != 1,
+      overflow: TextOverflow.clip,
+      maxLines: component.maxLines,
+    );
   }
 }

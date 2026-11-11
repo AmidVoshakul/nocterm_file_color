@@ -11,8 +11,8 @@ The approach is a **widget wrapper `FileTextField`** (NOT a fork of Nocterm). Wr
 **Important:** Nocterm 0.9.0's `TextField` does NOT support inline styles. To display colored inline tags (e.g. `[image 1]`) as colored emoji-like icons within the input field, the package uses `RichText` alongside `TextField` for visual rendering. This is a **new component** approach — not a fork of Nocterm.
 
 ### Components
-- `FileTextField` — wrapper over `TextField`; accepts parameters `TextField` + `fileConfig`, `slashAnchor` (`SlashAnchor.anywhere`/`startOnly`, where the `/` menu may open), `onFileClick`, `onFilesChanged`; method `getAttachedFiles()`.
-- `TokenHighlightTextField` — coloring-only wrapper over `TextField`; colors every occurrence of each `InlineToken` inline (transparent field + `RichText` overlay with selection/cursor emulation); no attachments, no menus, no paste; `onChanged` fires exactly once per controller change (inner field contract).
+- `FileTextField` — wrapper over `TextField`; accepts parameters `TextField` + `fileConfig`, `slashAnchor` (`SlashAnchor.anywhere`/`startOnly`, where the `/` menu may open), `onFileClick`, `onFilesChanged`; method `getAttachedFiles()`. Grows with its content up to `maxLinesVisible` rows (default 8) and scrolls beyond that with caret-following; an explicit `height` governs the box instead.
+- `TokenHighlightTextField` — coloring-only wrapper over `TextField`; colors every occurrence of each `InlineToken` inline (transparent field + `RichText` overlay with selection/cursor emulation); no attachments, no menus, no paste; `onChanged` fires exactly once per controller change (inner field contract). Same grow-then-scroll viewport as `FileTextField`.
 - `TokenText` — stateless read-only rendering of a `String` with colored `InlineToken`s (preview lines, lists).
 - `InlineToken` — immutable `{token, FileStyle}` record with `==`/`hashCode`.
 - `FileTag` - color tag `[type name]`, clickable.
@@ -44,6 +44,7 @@ lib/
     file_text_field_suggestion.dart # @/ menu model + kinds + defaults
     suggestion_menu_style.dart # style of the built-in menu
     cursor_blink_mixin.dart # shared caret blink for overlay fields
+    text_viewport.dart # shared grow-then-scroll viewport for the fields
     token_highlight_text_field.dart # coloring-only wrapper over TextField
     token_text.dart # stateless read-only colored token text
     inline_token.dart # immutable {token, FileStyle}
@@ -63,6 +64,10 @@ lib/
 4. `TextField.onPaste: bool Function(String)?` - return `true` to intercept the paste yourself.
 5. `TextField.onKeyEvent: bool Function(KeyboardEvent)?` - interception `@`, Ctrl+V.
 6. Nocterm DOES NOT have built-in file/clipboard handling/MIME - it adds a package.
+7. `TextField` has NO vertical scroll: `maxLines` is a hard cap that blocks newline input, and the field paints every row it lays out regardless of its own size. Vertical viewports are built from `SingleChildScrollView` + `ScrollController` (child laid out with `maxHeight: infinity`, metrics reported from the layout phase); `ClipRect` cuts the overflow.
+8. The root of a Nocterm app is laid out with TIGHT terminal-sized constraints, and `BoxConstraints.enforce` uses `clamp` — a smaller `maxHeight` given above the root is clamped UP to the terminal height. Height caps must be applied below a `Stack` (or other `loosen()` boundary), never at the root level.
+9. A `TextField` wraps at the width its CONSTRAINTS give it (minus one column reserved for the caret), not at its `width` parameter; `width` only drives the single-line horizontal scroll window. The overlay and the field must therefore be given the same width by an explicit box.
+10. `Transform` is a pass-through stub in 0.9.0; the public bridge into a `RichText` render object's layout (`BuildContext.renderObject`, `RenderParagraph.selectableLayout`) works, but neither type is exported — reach it dynamically. Terminal wheel events never reach a scroll view nested under a text field: the field's own mouse annotation swallows them; wrap the input in a `MouseRegion` to handle wheels.
 
 ## Design Rules
 - The file type is determined **by extension only** (`.png`, `.pdf`, `.txt`, etc.).
@@ -75,7 +80,7 @@ lib/
 ## Build and tests
 ```bash
 dart pub get # install dependencies
-dart analyze # static analysis 
+dart analyze # static analysis
 dart test # tests
 dart format . # formatting
 ```

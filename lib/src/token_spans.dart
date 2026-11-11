@@ -128,6 +128,20 @@ void _appendStyledText(
                 selectionColor ?? TerminalColors.resolve(Colors.grey),
           )
         : baseStyle;
+    if (cursorOffset == offset && grapheme == '\n') {
+      // The caret at the end of a row: a styled newline paints no cell, so
+      // the caret is a space at the end of the row it closes — the way the
+      // caret past the last character already paints.
+      spans.add(
+        TextSpan(
+          text: ' ',
+          style: _cursorTextStyle(style, cursorColor, cursorStyle),
+        ),
+      );
+      spans.add(TextSpan(text: grapheme, style: style));
+      offset += grapheme.length;
+      continue;
+    }
     final displayStyle = cursorOffset == offset
         ? _cursorTextStyle(style, cursorColor, cursorStyle)
         : style;

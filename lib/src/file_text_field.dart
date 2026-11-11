@@ -10,6 +10,7 @@ import 'suggestion_grouping.dart';
 import 'terminal_colors.dart';
 import 'suggestion_menu_style.dart';
 import 'inline_token.dart';
+import 'text_viewport.dart';
 import 'token_spans.dart';
 import 'cursor_blink_mixin.dart';
 
@@ -124,6 +125,7 @@ class FileTextField extends StatefulComponent {
     this.obscuringCharacter = '•',
     this.maxLines = 1,
     this.minLines,
+    this.maxLinesVisible = 8,
     this.maxLength,
     this.onChanged,
     this.onEditingComplete,
@@ -161,6 +163,7 @@ class FileTextField extends StatefulComponent {
     this.suggestionScrollThreshold = 1,
   }) : assert(maxLines == null || maxLines > 0),
        assert(minLines == null || minLines > 0),
+       assert(maxLinesVisible > 0, 'maxLinesVisible must be greater than 0'),
        assert(
          (maxLines == null) || (minLines == null) || (maxLines >= minLines),
          "minLines can't be greater than maxLines",
@@ -185,7 +188,21 @@ class FileTextField extends StatefulComponent {
   final String obscuringCharacter;
   final int? maxLines;
   final int? minLines;
+
+  /// How many rows the input grows to before it scrolls.
+  ///
+  /// The field starts at a single row and grows with its content up to this
+  /// many rows; beyond that the text scrolls and the caret is kept in view,
+  /// so the field never grows without bound and breaks the surrounding
+  /// layout. Only applies while [height] is unset — an explicit [height]
+  /// governs the box instead.
+  final int maxLinesVisible;
+
   final int? maxLength;
+
+  /// Fires for every controller change — text and selection alike, the way
+  /// Nocterm's own field reports. Pair it with the controller when only
+  /// edits matter to you.
   final ValueChanged<String>? onChanged;
   final VoidCallback? onEditingComplete;
   final ValueChanged<String>? onSubmitted;
@@ -285,7 +302,7 @@ class _SuggestionNavFrame {
 
 /// Mutable state for [FileTextField], exposed via [GlobalKey] for [getAttachedFiles].
 class FileTextFieldState extends State<FileTextField>
-    with CursorBlinkMixin<FileTextField> {
+    with CursorBlinkMixin<FileTextField>, TextViewportMixin<FileTextField> {
   late TextEditingController _controller;
   bool _controllerIsInternal = false;
   final List<FileInfo> _attachedFiles = [];
@@ -757,7 +774,25 @@ class FileTextFieldState extends State<FileTextField>
     _syncAttachmentsFromText();
     _syncCursorBlink();
     setState(() {});
+    placeCaretInView();
+    resetViewportTargetColumn();
   }
+
+  @override
+  String get viewportText => _controller.text;
+
+  @override
+  TextSelection get viewportSelection => _controller.selection;
+
+  @override
+  set viewportSelection(TextSelection selection) =>
+      _controller.selection = selection;
+
+  @override
+  int get viewportMaxLinesVisible => component.maxLinesVisible;
+
+  @override
+  bool get viewportFocused => component.focused;
 
   @override
   void initState() {
@@ -794,6 +829,7 @@ class FileTextFieldState extends State<FileTextField>
       _controller.addListener(_handleControllerChanged);
       _syncAttachmentsFromText();
       _syncCursorBlink();
+      placeCaretInView();
     }
     if (component.onSuggestionsRequested !=
             oldComponent.onSuggestionsRequested &&
@@ -889,6 +925,11 @@ class FileTextFieldState extends State<FileTextField>
     // Ctrl+V - let TextField handle paste (which calls onPaste)
     if (event.logicalKey == LogicalKey.keyV && event.isControlPressed) {
       return false; // Let TextField handle it
+    }
+    // The boundary rows act like Home and End; mid-text arrows stay with
+    // Nocterm's own caret movement.
+    if (component.maxLines != 1 && viewportHandleBoundaryArrow(event)) {
+      return true;
     }
     return false;
   }
@@ -1348,11 +1389,32 @@ class FileTextFieldState extends State<FileTextField>
   @override
   Component build(BuildContext context) {
     final showInlineTags = _inlineTokens.isNotEmpty && !component.obscureText;
-    final textField = TextField(
+    // An explicit height governs the box; without one the field sizes
+    // itself, and maxLinesVisible caps the growth.
+    final input = component.height == null
+        ? _buildViewportInput(showInlineTags)
+        : _buildFixedInput(showInlineTags);
+
+    if (_activeTrigger == null) return input;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [_buildSuggestionMenu(), input],
+    );
+  }
+
+  /// The inner field, shared by both input layouts.
+  TextField _buildInnerTextField({
+    required bool showInlineTags,
+    required double? width,
+    required double? height,
+    required InputDecoration? decoration,
+  }) {
+    return TextField(
       controller: _controller,
       focused: component.focused,
       onFocusChange: component.onFocusChange,
-      decoration: component.decoration,
+      decoration: decoration,
       style: showInlineTags
           ? (component.style ?? const TextStyle()).copyWith(
               color: const Color.fromARGB(0, 0, 0, 0),
@@ -1380,65 +1442,129 @@ class FileTextFieldState extends State<FileTextField>
       cursorBlinkRate: component.cursorBlinkRate,
       selectionColor: TerminalColors.resolve(component.selectionColor),
       showCursor: showInlineTags ? false : component.showCursor,
+      width: width,
+      height: height,
+    );
+  }
+
+  /// The layout for a host that sized the field itself: the field, plus the
+  /// colored overlay when inline tags are present.
+  Component _buildFixedInput(bool showInlineTags) {
+    final textField = _buildInnerTextField(
+      showInlineTags: showInlineTags,
       width: component.width,
       height: component.height,
+      decoration: component.decoration,
     );
+    if (!showInlineTags) return textField;
+    return Stack(
+      children: [
+        textField,
+        // One column narrower than the field: Nocterm reserves the last
+        // column for its caret, so the overlay wraps one column short of
+        // the field's own wrap window.
+        if (component.width != null)
+          SizedBox(width: component.width! - 1, child: _buildOverlay())
+        else
+          _buildOverlay(),
+      ],
+    );
+  }
 
-    Component input = textField;
-    if (showInlineTags) {
-      final text = _controller.text;
-      final selection = _controller.selection;
-      // The overlay draws the package's own caret and selection, so both go
-      // through the colour probe like every other colour the package emits.
-      final cursorColor = TerminalColors.resolve(
-        component.cursorColor ?? TuiTheme.of(context).primary,
-      );
-      input = Stack(
-        children: [
-          textField,
-          GestureDetector(
-            onTapDown: _handleInlineTapDown,
-            child: RichText(
-              text: TextSpan(
-                children: buildInlineSpans(
-                  text: text,
-                  tokens: _inlineTokens
-                      .map(
-                        (inlineToken) => InlineToken(
-                          token: inlineToken.token,
-                          style: inlineToken.style,
-                        ),
-                      )
-                      .toList(),
-                  selectionStart: selection.start.clamp(0, text.length),
-                  selectionEnd: selection.end.clamp(0, text.length),
-                  cursorOffset:
-                      component.focused && component.showCursor && cursorVisible
-                      ? selection.extentOffset.clamp(0, text.length)
-                      : null,
-                  cursorColor: cursorColor,
-                  baseStyle: component.style ?? const TextStyle(),
-                  selectionColor:
-                      TerminalColors.resolve(component.selectionColor) ??
-                      cursorColor?.withOpacity(0.4),
-                  cursorStyle: component.cursorStyle,
-                ),
-              ),
-              textAlign: component.textAlign,
-              softWrap: component.maxLines != 1,
-              overflow: TextOverflow.clip,
-              maxLines: component.maxLines,
-            ),
+  /// The self-sizing layout: the field and its overlay scroll together inside
+  /// a box capped at [FileTextField.maxLinesVisible] rows. The box itself
+  /// comes from [TextViewportMixin]; here only the two layers are built.
+  Component _buildViewportInput(bool showInlineTags) {
+    return buildViewportBox(
+      width: component.width,
+      decoration: component.decoration,
+      focused: component.focused,
+      maxLines: component.maxLines,
+      layers: (fieldWidth, textWidth) {
+        final overlay = showInlineTags
+            ? GestureDetector(
+                onTapDown: (details) =>
+                    _handleInlineTapDown(details, leftInset: 0),
+                child: _buildOverlayRichText(),
+              )
+            : null;
+        return (
+          _buildInnerTextField(
+            showInlineTags: showInlineTags,
+            width: fieldWidth,
+            height: null,
+            decoration: null,
           ),
-        ],
-      );
-    }
+          overlay,
+        );
+      },
+    );
+  }
 
-    if (_activeTrigger == null) return input;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [_buildSuggestionMenu(), input],
+  /// Whether the decoration paints a box (and therefore adds its padding).
+  bool get _hasFieldDecoration =>
+      component.decoration?.border != null ||
+      component.decoration?.fillColor != null;
+
+  /// The colored overlay with its tap handling, shared by both layouts.
+  Component _buildOverlay() {
+    return GestureDetector(
+      onTapDown: (details) =>
+          _handleInlineTapDown(details, leftInset: _overlayLeftInset),
+      child: _buildOverlayRichText(),
+    );
+  }
+
+  /// The distance from the flat overlay's left edge to the first text
+  /// column — the field's decoration insets its own text.
+  double get _overlayLeftInset {
+    if (!_hasFieldDecoration) return 0;
+    final contentPadding = component.decoration?.contentPadding;
+    return 1 + (contentPadding?.left ?? 1);
+  }
+
+  RichText _buildOverlayRichText() {
+    final text = _controller.text;
+    final selection = _controller.selection;
+    // The overlay draws the package's own caret and selection, so both go
+    // through the colour probe like every other colour the package emits.
+    final cursorColor = TerminalColors.resolve(
+      component.cursorColor ?? TuiTheme.of(context).primary,
+    );
+    return RichText(
+      // The key rides the paragraph: Nocterm's element exposes a render
+      // object only on render object elements, and the tap origin is
+      // measured from this box.
+      key: viewportOverlayKey,
+      text: TextSpan(
+        children: buildInlineSpans(
+          text: text,
+          tokens: _inlineTokens
+              .map(
+                (inlineToken) => InlineToken(
+                  token: inlineToken.token,
+                  style: inlineToken.style,
+                ),
+              )
+              .toList(),
+          selectionStart: selection.start.clamp(0, text.length),
+          selectionEnd: selection.end.clamp(0, text.length),
+          cursorOffset:
+              component.focused && component.showCursor && cursorVisible
+              ? selection.extentOffset.clamp(0, text.length)
+              : null,
+          cursorColor: cursorColor,
+          baseStyle: component.style ?? const TextStyle(),
+          selectionColor:
+              TerminalColors.resolve(component.selectionColor) ??
+              cursorColor?.withOpacity(0.4),
+          cursorStyle: component.cursorStyle,
+        ),
+      ),
+      textAlign: component.textAlign,
+      softWrap: component.maxLines != 1,
+      overflow: TextOverflow.clip,
+      maxLines: component.maxLines,
     );
   }
 
@@ -1651,23 +1777,47 @@ class FileTextFieldState extends State<FileTextField>
     });
   }
 
-  void _handleInlineTapDown(TapDownDetails details) {
+  /// Moves the caret to the tapped position, or opens a tapped file tag.
+  ///
+  /// Nocterm's gesture recognizers report the raw terminal coordinates, so
+  /// [viewportLocalTapPosition] turns them into a position inside the
+  /// overlay's box — whose parent chain also carries the scroll translation,
+  /// so the result is already in the text's own rows. [leftInset] is the
+  /// distance from there to the first text column — the flat layout draws
+  /// the overlay over the field's own decoration, so it passes the
+  /// decoration's inset; the viewport layout draws the overlay inside the
+  /// padding, where the tap position is already text-relative and the inset
+  /// is zero. Neither layout adds the scroll offset here: it is measured
+  /// once, off the render chain.
+  ///
+  /// Taps are resolved per row: the viewport layout knows the rows of the
+  /// text and how far the view is scrolled, so a tap on a lower row hits
+  /// that row. The flat layout has neither and keeps the first row.
+  void _handleInlineTapDown(
+    TapDownDetails details, {
+    required double leftInset,
+  }) {
     final text = _controller.text;
-    final contentPadding = component.decoration?.contentPadding;
-    final hasDecoration =
-        component.decoration?.border != null ||
-        component.decoration?.fillColor != null;
-    final leftInset = hasDecoration ? 1 + (contentPadding?.left ?? 1) : 0;
-    final targetColumn = (details.localPosition.dx - leftInset).floor().clamp(
+    final local = viewportLocalTapPosition(details.localPosition);
+    final lines = viewportOracleLines();
+    final row = lines == null ? 0 : local.dy.floor().clamp(0, lines.length - 1);
+    final rowText = lines == null ? text : lines[row];
+    final rowStart = lines == null
+        ? 0
+        : lines.take(row).fold<int>(0, (sum, line) => sum + line.length + 1);
+
+    // A wide grapheme occupies two columns, so the column walk needs twice
+    // the row's length to reach its end.
+    final targetColumn = (local.dx - leftInset).floor().clamp(
       0,
-      text.length,
+      rowText.length * 2,
     );
     var column = 0;
-    var offset = 0;
+    var offset = rowStart;
 
-    for (final grapheme in text.characters) {
+    for (final grapheme in rowText.characters) {
       if (column >= targetColumn) break;
-      column += _terminalWidth(grapheme);
+      column += TextViewportMixin.terminalColumnWidth(grapheme);
       offset += grapheme.length;
     }
     offset = offset.clamp(0, text.length);
@@ -1694,23 +1844,5 @@ class FileTextFieldState extends State<FileTextField>
 
     _controller.selection = TextSelection.collapsed(offset: offset);
     if (!component.focused) component.onFocusChange?.call(true);
-  }
-
-  int _terminalWidth(String grapheme) {
-    final rune = grapheme.runes.first;
-    if (rune >= 0x1100 &&
-        (rune <= 0x115f ||
-            rune == 0x2329 ||
-            rune == 0x232a ||
-            (rune >= 0x2e80 && rune <= 0xa4cf) ||
-            (rune >= 0xac00 && rune <= 0xd7a3) ||
-            (rune >= 0xf900 && rune <= 0xfaff) ||
-            (rune >= 0xfe10 && rune <= 0xfe6f) ||
-            (rune >= 0xff00 && rune <= 0xff60) ||
-            (rune >= 0xffe0 && rune <= 0xffe6) ||
-            (rune >= 0x1f300 && rune <= 0x1faff))) {
-      return 2;
-    }
-    return 1;
   }
 }

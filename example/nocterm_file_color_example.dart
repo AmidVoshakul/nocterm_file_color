@@ -391,7 +391,10 @@ class _ComposerDemoState extends State<ComposerDemo> {
               key: _fieldKey,
               controller: _controller,
               focused: true,
-              maxLines: 25,
+              // The composer grows with its input up to eight rows and
+              // scrolls after that — the text itself is never capped.
+              maxLines: null,
+              maxLinesVisible: 8,
               placeholder:
                   'Type a message with @ agent, files or sessions, / commands…',
               cursorColor: _agentColor,

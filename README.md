@@ -1,11 +1,13 @@
 # Nocterm File Color
 
-[![Coverage](https://img.shields.io/badge/coverage-95.3%25-brightgreen)](https://github.com/AmidVoshakul/nocterm_file_color/actions)
+[![CI](https://github.com/AmidVoshakul/nocterm_file_color/actions/workflows/ci.yml/badge.svg)](https://github.com/AmidVoshakul/nocterm_file_color/actions/workflows/ci.yml)
+[![Release](https://github.com/AmidVoshakul/nocterm_file_color/actions/workflows/release.yml/badge.svg)](https://github.com/AmidVoshakul/nocterm_file_color/actions/workflows/release.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Coverage](https://img.shields.io/badge/coverage-95%25-brightgreen)](https://github.com/AmidVoshakul/nocterm_file_color/actions)
 [![Pub Version](https://img.shields.io/pub/v/nocterm_file_color)](https://pub.dev/packages/nocterm_file_color)
 [![pub points](https://img.shields.io/pub/points/nocterm_file_color?logo=dart)](https://pub.dev/packages/nocterm_file_color/score)
 [![Pub Monthly Downloads](https://img.shields.io/pub/dm/nocterm_file_color?logo=dart&color=yellow)](https://pub.dev/packages/nocterm_file_color/score)
-[![Dart](https://img.shields.io/badge/Dart-0175C2?logo=dart)](https://dart.dev)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Dart](https://img.shields.io/badge/Language-Dart-0175C2?logo=dart)](https://dart.dev)
 
 A Nocterm `TextField` wrapper that displays attached files and colored tokens
 inline in the input line.
@@ -29,7 +31,7 @@ Everything attached stays available through `getAttachedFiles()`.
 ```yaml
 dependencies:
   nocterm: ^0.9.0
-  nocterm_file_color: ^0.0.5
+  nocterm_file_color: ^0.0.6
 ```
 
 ## Usage
@@ -74,6 +76,21 @@ Files take their colors from a `FileConfig`, exactly like attachments:
 ```dart
 final config = FileConfig.defaultConfig();
 FileTextFieldSuggestion.file(file, style: config.styleFor(file));
+```
+
+## Growing input
+
+Both fields start at one row and grow with your content up to
+`maxLinesVisible` rows (8 by default); beyond that the text scrolls and the
+caret is kept in view, so a composer never grows without bound and breaks
+your layout.
+
+```dart
+FileTextField(
+  controller: controller,
+  maxLines: null,
+  maxLinesVisible: 8,
+);
 ```
 
 ## Pasting
@@ -197,7 +214,7 @@ inside the package either way. See `example/` for a full implementation.
 | **Document** | Blue |
 | **Code** | Green |
 | **Archive** | Yellow |
-| **Audio** / Video | Cyan |
+| **Audio** / **Video** | Cyan |
 | **Other** | Grey |
 
 Tune defaults per type and overrides per extension with `FileConfig`.
