@@ -11,7 +11,7 @@ The approach is a **widget wrapper `FileTextField`** (NOT a fork of Nocterm). Wr
 **Important:** Nocterm 0.9.0's `TextField` does NOT support inline styles. To display colored inline tags (e.g. `[image 1]`) as colored emoji-like icons within the input field, the package uses `RichText` alongside `TextField` for visual rendering. This is a **new component** approach — not a fork of Nocterm.
 
 ### Components
-- `FileTextField` — wrapper over `TextField`; accepts parameters `TextField` + `fileConfig`, `slashAnchor` (`SlashAnchor.anywhere`/`startOnly`, where the `/` menu may open), `onFileClick`, `onFilesChanged`; method `getAttachedFiles()`. Grows with its content up to `maxLinesVisible` rows (default 8) and scrolls beyond that with caret-following; an explicit `height` governs the box instead.
+- `FileTextField` — wrapper over `TextField`; accepts parameters `TextField` + `fileConfig`, `slashAnchor` (`SlashAnchor.anywhere`/`startOnly`, where the `/` menu may open), `onFileClick`, `onFilesChanged`, `promptHistory`, `promptHistoryFilter`; method `getAttachedFiles()`. Grows with its content up to `maxLinesVisible` rows (default 8) and scrolls beyond that with caret-following; an explicit `height` governs the box instead. Optional readline-style prompt history (ArrowUp/ArrowDown recall, draft save/restore, consecutive dedup, capacity cap) via an injectable `PromptHistoryController` (in-memory by default; `FilePromptHistoryStorage` for persistence).
 - `TokenHighlightTextField` — coloring-only wrapper over `TextField`; colors every occurrence of each `InlineToken` inline (transparent field + `RichText` overlay with selection/cursor emulation); no attachments, no menus, no paste; `onChanged` fires exactly once per controller change (inner field contract). Same grow-then-scroll viewport as `FileTextField`.
 - `TokenText` — stateless read-only rendering of a `String` with colored `InlineToken`s (preview lines, lists).
 - `InlineToken` — immutable `{token, FileStyle}` record with `==`/`hashCode`.
@@ -41,6 +41,8 @@ lib/
     file_text_field.dart # widget wrapper over TextField
     file_system_cache.dart # LRU directory listings + batched tree walk
     terminal_colors.dart # NO_COLOR support for the package's colours
+    prompt_history.dart # prompt history state, storage, controller, codec
+    prompt_edge_step.dart # pure readline edge-stepping helpers
     file_text_field_suggestion.dart # @/ menu model + kinds + defaults
     suggestion_menu_style.dart # style of the built-in menu
     cursor_blink_mixin.dart # shared caret blink for overlay fields

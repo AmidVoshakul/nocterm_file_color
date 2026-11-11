@@ -26,7 +26,7 @@ colored tag (`[lib/main.dart]`, `[image 1]`, `[image 2]`, `[lib/]`, `@agent`, `/
 and `/` menus are either drawn by the package or handed to your own layout.
 Everything attached stays available through `getAttachedFiles()`.
 
-## Getting Started
+## 🚀 Getting Started
 
 ```yaml
 dependencies:
@@ -90,6 +90,21 @@ FileTextField(
   controller: controller,
   maxLines: null,
   maxLinesVisible: 8,
+);
+```
+
+## Prompt history
+
+`FileTextField` keeps submitted prompts and recalls them with ArrowUp/ArrowDown
+(readline edge-stepping: the caret snaps to the line edge first, then history;
+draft save/restore; consecutive dedup; capacity cap). In-memory by default,
+injectable `PromptHistoryStorage` (with a ready `FilePromptHistoryStorage` +
+`PromptHistoryCodec` JSONL) for persistence.
+
+```dart
+FileTextField(
+  controller: controller,
+  promptHistory: PromptHistoryController(),
 );
 ```
 
@@ -206,7 +221,7 @@ class _MyComposerState extends State<MyComposer> {
 Trigger detection, filtering, keyboard navigation and token insertion stay
 inside the package either way. See `example/` for a full implementation.
 
-## Default file colors
+## 🎨 Default file colors
 
 | Type | Color |
 |------|-------|
@@ -223,6 +238,17 @@ Tune defaults per type and overrides per extension with `FileConfig`.
 
 See [`example/nocterm_file_color_example.dart`](example/nocterm_file_color_example.dart) for a complete runnable demo.
 
-## License
+## 🤝 Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, checks, and
+pull request guidelines.
+
+## ⚖️ License
 
 [MIT](LICENSE)
+
+<div align="center">
+
+Created by [Amid Voshakul 🌠](https://github.com/AmidVoshakul)
+
+</div>

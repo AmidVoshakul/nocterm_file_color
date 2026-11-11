@@ -54,6 +54,11 @@ class _ComposerDemoState extends State<ComposerDemo> {
 
   final _controller = TextEditingController();
 
+  /// Entered prompts are recalled with ArrowUp/ArrowDown; the field owns an
+  /// in-memory history by default, but a shared controller lets the host
+  /// persist it if it wants to.
+  final _promptHistory = PromptHistoryController();
+
   /// Directory listings live here: the provider runs on every keystroke, so
   /// each directory is listed once and reused within the TTL.
   final _directoryCache = FileSystemCache();
@@ -88,6 +93,7 @@ class _ComposerDemoState extends State<ComposerDemo> {
   @override
   void dispose() {
     _controller.dispose();
+    _promptHistory.dispose();
     super.dispose();
   }
 
@@ -395,6 +401,7 @@ class _ComposerDemoState extends State<ComposerDemo> {
               // scrolls after that — the text itself is never capped.
               maxLines: null,
               maxLinesVisible: 8,
+              promptHistory: _promptHistory,
               placeholder:
                   'Type a message with @ agent, files or sessions, / commands…',
               cursorColor: _agentColor,

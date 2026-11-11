@@ -1,3 +1,9 @@
+## Unreleased
+
+### Features
+
+- **Prompt history**: `FileTextField` stores submitted prompts and recalls them with ArrowUp/ArrowDown (readline edge-stepping: cursor snaps to the line edge first, then history; draft save/restore; consecutive dedup; capacity cap). In-memory by default, injectable `PromptHistoryStorage` (with a ready `FilePromptHistoryStorage` + `PromptHistoryCodec` JSONL) for persistence. `TokenHighlightTextField` stays coloring-only but the controller is exported for reuse.
+
 ## 0.0.6
 
 ### Features

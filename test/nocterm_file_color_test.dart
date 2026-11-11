@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:nocterm_file_color/nocterm_file_color.dart';
 import 'package:test/test.dart';
-import 'package:nocterm/nocterm.dart';
+import 'package:nocterm/nocterm.dart' hide isEmpty;
 
 List<FileTextFieldSuggestion> _mockSuggestions(String trigger, String query) {
   final fileConfig = FileConfig.defaultConfig();
@@ -5392,6 +5392,283 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
           Colors.brightMagenta,
         );
       });
+    });
+  });
+  group('prompt history', () {
+    test('recalls the previous prompt on ArrowUp', () async {
+      final controller = TextEditingController();
+      final history = PromptHistoryController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('history up', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 20,
+            maxLines: 1,
+            promptHistory: history,
+            onSubmitted: (_) => controller.text = '',
+          ),
+        );
+        controller.text = 'first prompt';
+        await tester.pump();
+        // submit
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+        // submit clears via onSubmitted callback
+
+        // Up recalls the submitted prompt.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowUp),
+        );
+        await tester.pump();
+        expect(controller.text, 'first prompt');
+        expect(controller.selection.extentOffset, 'first prompt'.length);
+      });
+
+      controller.dispose();
+      controller.clear();
+    });
+
+    test('ArrowDown restores the draft past the newest entry', () async {
+      final controller = TextEditingController();
+      final history = PromptHistoryController();
+
+      await testNocterm('history down', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 20,
+            maxLines: 1,
+            promptHistory: history,
+            onSubmitted: (_) => controller.text = '',
+          ),
+        );
+        controller.text = 'draft text';
+        await tester.pump();
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+        controller.text = 'new draft';
+        await tester.pump();
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowUp),
+        );
+        await tester.pump();
+        expect(controller.text, 'draft text');
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowDown),
+        );
+        await tester.pump();
+        expect(controller.text, 'new draft');
+      });
+
+      controller.dispose();
+    });
+
+    test('submitting pushes to an injected storage', () async {
+      final dir = await Directory.systemTemp.createTemp('phw');
+      final storage = FilePromptHistoryStorage('${dir.path}/h.jsonl');
+      final history = PromptHistoryController(storage: storage);
+      await history.load();
+      final controller = TextEditingController();
+
+      await testNocterm('history storage', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 20,
+            maxLines: 1,
+            promptHistory: history,
+            onSubmitted: (_) => controller.text = '',
+          ),
+        );
+        controller.text = 'persisted prompt';
+        await tester.pump();
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        final loaded = await storage.load();
+        expect(loaded, contains('persisted prompt'));
+      });
+
+      controller.dispose();
+      await dir.delete(recursive: true);
+    });
+
+    test('promptHistoryFilter skips filtered entries', () async {
+      final history = PromptHistoryController(
+        filter: (t) => !t.startsWith('/'),
+      );
+      final controller = TextEditingController();
+
+      await testNocterm('history filter', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 20,
+            maxLines: 1,
+            promptHistory: history,
+            onSubmitted: (_) => controller.text = '',
+          ),
+        );
+        controller.text = '/secret';
+        await tester.pump();
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+        expect(history.items, isEmpty);
+
+        controller.text = 'hello';
+        await tester.pump();
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+        expect(history.items, ['hello']);
+      });
+
+      controller.dispose();
+    });
+
+    test('edit mid-browse resets navigation', () async {
+      final history = PromptHistoryController();
+      final controller = TextEditingController();
+
+      await testNocterm('history edit', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 20,
+            maxLines: 1,
+            promptHistory: history,
+            onSubmitted: (_) => controller.text = '',
+          ),
+        );
+        controller.text = 'old';
+        await tester.pump();
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+        controller.text = 'draft';
+        await tester.pump();
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowUp),
+        );
+        await tester.pump();
+        expect(controller.text, 'old');
+        expect(history.state.index, isNotNull);
+
+        // edit
+        await tester.enterText('x');
+        await tester.pump();
+        expect(history.state.index, isNull);
+      });
+
+      controller.dispose();
+    });
+
+    test('single-line Up recalls immediately', () async {
+      final history = PromptHistoryController();
+      final controller = TextEditingController();
+
+      await testNocterm('history single', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 20,
+            maxLines: 1,
+            promptHistory: history,
+            onSubmitted: (_) => controller.text = '',
+          ),
+        );
+        controller.text = 'remembered';
+        await tester.pump();
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+        expect(controller.text, '');
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowUp),
+        );
+        await tester.pump();
+        expect(controller.text, 'remembered');
+      });
+
+      controller.dispose();
+    });
+
+    test('consecutive duplicate submit is deduped', () async {
+      final history = PromptHistoryController();
+      final controller = TextEditingController();
+
+      await testNocterm('history dedup', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 20,
+            maxLines: 1,
+            promptHistory: history,
+            onSubmitted: (_) => controller.text = '',
+          ),
+        );
+        for (var i = 0; i < 2; i++) {
+          controller.text = 'same';
+          await tester.pump();
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.enter),
+          );
+          await tester.pump();
+        }
+        expect(history.items, ['same']);
+      });
+
+      controller.dispose();
+    });
+
+    test('pushPrompt / getPromptHistory / clearPromptHistory', () async {
+      final history = PromptHistoryController();
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('history api', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 20,
+            maxLines: 1,
+            promptHistory: history,
+            onSubmitted: (_) => controller.text = '',
+          ),
+        );
+        key.currentState!.pushPrompt('manual');
+        expect(key.currentState!.getPromptHistory(), ['manual']);
+        await key.currentState!.clearPromptHistory();
+        expect(key.currentState!.getPromptHistory(), isEmpty);
+      });
+
+      controller.dispose();
     });
   });
 }

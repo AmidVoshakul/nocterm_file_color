@@ -10,6 +10,7 @@ import 'suggestion_grouping.dart';
 import 'terminal_colors.dart';
 import 'suggestion_menu_style.dart';
 import 'inline_token.dart';
+import 'prompt_history.dart';
 import 'text_viewport.dart';
 import 'token_spans.dart';
 import 'cursor_blink_mixin.dart';
@@ -161,6 +162,8 @@ class FileTextField extends StatefulComponent {
     this.suggestionPageSize = 8,
     this.suggestionCyclicScroll = true,
     this.suggestionScrollThreshold = 1,
+    this.promptHistory,
+    this.promptHistoryFilter,
   }) : assert(maxLines == null || maxLines > 0),
        assert(minLines == null || minLines > 0),
        assert(maxLinesVisible > 0, 'maxLinesVisible must be greater than 0'),
@@ -281,6 +284,14 @@ class FileTextField extends StatefulComponent {
   /// the selection leaves the window entirely.
   final int suggestionScrollThreshold;
 
+  /// Optional prompt history for this field. When null and prompt history is
+  /// enabled (the default), the field creates its own in-memory controller.
+  final PromptHistoryController? promptHistory;
+
+  /// Optional filter applied to a submitted prompt before it is pushed to
+  /// history. Return false to skip pushing (e.g. secrets, short noise).
+  final bool Function(String text)? promptHistoryFilter;
+
   @override
   State<FileTextField> createState() => FileTextFieldState();
 }
@@ -305,6 +316,10 @@ class FileTextFieldState extends State<FileTextField>
     with CursorBlinkMixin<FileTextField>, TextViewportMixin<FileTextField> {
   late TextEditingController _controller;
   bool _controllerIsInternal = false;
+  String _lastReportedText = '';
+  PromptHistoryController? _promptHistory;
+  bool _promptHistoryIsInternal = false;
+  bool _historyNavigating = false;
   final List<FileInfo> _attachedFiles = [];
   final List<_InlineToken> _inlineTokens = [];
   String? _activeTrigger;
@@ -324,6 +339,21 @@ class FileTextFieldState extends State<FileTextField>
   /// Call this before sending the message to the AI model to include all
   /// attachments in the context.
   List<FileInfo> getAttachedFiles() => List.unmodifiable(_attachedFiles);
+
+  /// The prompt history controller backing this field, if any.
+  PromptHistoryController? get promptHistory => _promptHistory;
+
+  /// Returns the stored prompt history entries (oldest-first).
+  List<String> getPromptHistory() =>
+      List.unmodifiable(_promptHistory?.items ?? const []);
+
+  /// Clears the stored prompt history (in-memory and, if configured, on disk).
+  Future<void> clearPromptHistory() =>
+      _promptHistory?.clear() ?? Future<void>.value();
+
+  /// Pushes [text] onto the prompt history manually (e.g. when submit
+  /// happens outside the field). No-op for empty/filtered/duplicate entries.
+  void pushPrompt(String text) => _promptHistory?.push(text);
 
   /// Navigation helpers for directory browsing
   int get navigationDepth => _navStack.length;
@@ -770,12 +800,20 @@ class FileTextFieldState extends State<FileTextField>
   // -- Lifecycle ------------------------------------------------------------
 
   void _handleControllerChanged() {
-    component.onChanged?.call(_controller.text);
-    _syncAttachmentsFromText();
+    final text = _controller.text;
+    if (text != _lastReportedText) {
+      _lastReportedText = text;
+      component.onChanged?.call(text);
+    }
+    if (!_historyNavigating) _syncAttachmentsFromText();
     _syncCursorBlink();
     setState(() {});
     placeCaretInView();
     resetViewportTargetColumn();
+    if (!_historyNavigating) {
+      _promptHistory?.resetNavigation();
+    }
+    _historyNavigating = false;
   }
 
   @override
@@ -805,6 +843,15 @@ class FileTextFieldState extends State<FileTextField>
       _controller = component.controller!;
     }
 
+    if (component.promptHistory == null) {
+      _promptHistory = PromptHistoryController(
+        filter: component.promptHistoryFilter,
+      );
+      _promptHistoryIsInternal = true;
+    } else {
+      _promptHistory = component.promptHistory;
+    }
+
     _controller.addListener(_handleControllerChanged);
     _syncCursorBlink();
   }
@@ -814,6 +861,9 @@ class FileTextFieldState extends State<FileTextField>
     _controller.removeListener(_handleControllerChanged);
     if (_controllerIsInternal) {
       _controller.dispose();
+    }
+    if (_promptHistoryIsInternal) {
+      _promptHistory?.dispose();
     }
     super.dispose();
   }
@@ -830,6 +880,13 @@ class FileTextFieldState extends State<FileTextField>
       _syncAttachmentsFromText();
       _syncCursorBlink();
       placeCaretInView();
+    }
+    if (component.promptHistory != oldComponent.promptHistory) {
+      if (_promptHistoryIsInternal) _promptHistory?.dispose();
+      _promptHistoryIsInternal = component.promptHistory == null;
+      _promptHistory =
+          component.promptHistory ??
+          (_promptHistoryIsInternal ? PromptHistoryController() : null);
     }
     if (component.onSuggestionsRequested !=
             oldComponent.onSuggestionsRequested &&
@@ -925,6 +982,50 @@ class FileTextFieldState extends State<FileTextField>
     // Ctrl+V - let TextField handle paste (which calls onPaste)
     if (event.logicalKey == LogicalKey.keyV && event.isControlPressed) {
       return false; // Let TextField handle it
+    }
+    // Prompt history: Up/Down recall entries when the caret is already at
+    // the edge (single-line fields are always at the edge). Mid-line, the
+    // boundary arrows below snap the caret to Home/End first.
+    final isUp = event.logicalKey == LogicalKey.arrowUp;
+    final isDown = event.logicalKey == LogicalKey.arrowDown;
+    if ((isUp || isDown) && _promptHistory != null) {
+      final lines = viewportOracleLines();
+      final offset = _controller.selection.extentOffset.clamp(
+        0,
+        _controller.text.length,
+      );
+      final atEdge =
+          component.maxLines == 1 ||
+          (lines != null &&
+              lines.isNotEmpty &&
+              (isUp
+                  ? (TextViewportMixin.viewportCaretRow(lines, offset) == 0 &&
+                        offset == 0)
+                  : (TextViewportMixin.viewportCaretRow(lines, offset) ==
+                            lines.length - 1 &&
+                        offset == _controller.text.length)));
+      if (atEdge) {
+        final result = isUp
+            ? _promptHistory!.moveUp(currentText: _controller.text)
+            : _promptHistory!.moveDown();
+        if (result != null) {
+          _historyNavigating = true;
+          _controller.text = result;
+          _historyNavigating = true;
+          _controller.selection = TextSelection.collapsed(
+            offset: result.length,
+          );
+          // History stores text only: attachments are not restored, so drop
+          // the stale tokens without re-parsing the recalled tags.
+          if (_inlineTokens.isNotEmpty || _attachedFiles.isNotEmpty) {
+            _inlineTokens.clear();
+            _attachedFiles.clear();
+            _notifyFilesChanged();
+          }
+          _historyNavigating = false;
+          return true;
+        }
+      }
     }
     // The boundary rows act like Home and End; mid-text arrows stay with
     // Nocterm's own caret movement.
@@ -1433,7 +1534,15 @@ class FileTextFieldState extends State<FileTextField>
       onEditingComplete: component.onEditingComplete,
       onSubmitted: component.onSubmitted == null
           ? null
-          : (value) => component.onSubmitted!(getExpandedText()),
+          : (value) {
+              final expanded = getExpandedText();
+              final history = _promptHistory;
+              if (history != null && expanded.trim().isNotEmpty) {
+                history.push(expanded);
+              }
+              history?.resetNavigation();
+              component.onSubmitted!(expanded);
+            },
       onPaste: _handlePaste,
       onKeyEvent: _handleKeyEvent,
       enabled: component.enabled,
