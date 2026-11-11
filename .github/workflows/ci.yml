@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Format
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze
+        run: dart analyze
+
+      - name: Test
+        run: dart test
+
+      - name: Coverage gate (core + layout >= 80%)
+        run: |
+          dart test --coverage=coverage
+          dart run coverage:format_coverage --lcov --in=coverage --out=coverage/lcov.info --packages=.dart_tool/package_config.json --report-on=lib
+          HIT=$(awk -F: '/^LH:/{sum += $2} END {print sum}' coverage/lcov.info)
+          TOTAL=$(awk -F: '/^LF:/{sum += $2} END {print sum}' coverage/lcov.info)
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "No coverage data found"
+            exit 1
+          fi
+          PERCENT=$((HIT * 100 / TOTAL))
+          echo "Line coverage: ${PERCENT}% (${HIT}/${TOTAL})"
+          if [ "$PERCENT" -lt 80 ]; then
+            echo "Coverage is below the 80% floor"
+            exit 1
+          fi

@@ -2,6 +2,7 @@ AGENTS.md
 .mcp.json
 .opencode/
 .vscode/
+.github/
 .codegraph/
 analysis_options.yaml
 test/

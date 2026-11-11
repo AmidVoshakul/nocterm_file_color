@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract release notes from the changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v version="## ${VERSION}" '
+            index($0, version) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes-body.md
+          {
+            echo "## ${VERSION}"
+            echo
+            cat release-notes-body.md
+          } > release-notes.md
+          if [ ! -s release-notes.md ] || [ "$(wc -l < release-notes.md)" -le 1 ]; then
+            echo "No changelog section for ${VERSION} — the release notes need one"
+            exit 1
+          fi
+          cat release-notes.md
+
+      - name: Verify the tag matches the package version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_VERSION=$(grep '^version:' pubspec.yaml | head -1 | sed 's/version: *//')
+          if [ "$VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Tag v${VERSION} does not match pubspec version ${PACKAGE_VERSION}"
+            exit 1
+          fi
+
+      - name: Publish the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          generate_release_notes: false
