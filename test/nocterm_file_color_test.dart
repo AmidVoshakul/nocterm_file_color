@@ -5500,7 +5500,7 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
         await tester.pump();
         await Future<void>.delayed(const Duration(milliseconds: 30));
         final loaded = await storage.load();
-        expect(loaded, contains('persisted prompt'));
+        expect(loaded.map((e) => e.text), contains('persisted prompt'));
       });
 
       controller.dispose();
@@ -5530,7 +5530,7 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
           const KeyboardEvent(logicalKey: LogicalKey.enter),
         );
         await tester.pump();
-        expect(history.items, isEmpty);
+        expect(history.texts, isEmpty);
 
         controller.text = 'hello';
         await tester.pump();
@@ -5538,7 +5538,7 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
           const KeyboardEvent(logicalKey: LogicalKey.enter),
         );
         await tester.pump();
-        expect(history.items, ['hello']);
+        expect(history.texts, ['hello']);
       });
 
       controller.dispose();
@@ -5639,7 +5639,350 @@ Host-owned suggestion menus – the application supplies @ and / candidates (Fil
           );
           await tester.pump();
         }
-        expect(history.items, ['same']);
+        expect(history.texts, ['same']);
+      });
+
+      controller.dispose();
+    });
+
+    test('recalling a prompt restores its attachments', () async {
+      final history = PromptHistoryController();
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('history recall files', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            maxLines: 1,
+            promptHistory: history,
+            onSubmitted: (_) => key.currentState?.clearAttachments(),
+          ),
+        );
+        // Attach a file, then submit.
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/main.dart'));
+        await tester.pump();
+        expect(controller.text, '[main.dart] ');
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+        // Field cleared, entry carries the file.
+        expect(controller.text, '');
+        expect(history.items.single.files.single.path, '/tmp/main.dart');
+
+        // Recall: text and attachment both come back.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowUp),
+        );
+        await tester.pump();
+        expect(controller.text, '[main.dart] ');
+        expect(key.currentState!.getAttachedFiles(), hasLength(1));
+        expect(
+          key.currentState!.getAttachedFiles().single.path,
+          '/tmp/main.dart',
+        );
+
+        // Re-sending the recalled prompt keeps the file.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+        expect(history.items.last.files.single.path, '/tmp/main.dart');
+      });
+
+      controller.dispose();
+    });
+
+    test('recalling entries swaps their attachments (up and down)', () async {
+      final history = PromptHistoryController();
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('history recall swap', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            maxLines: 1,
+            promptHistory: history,
+            onSubmitted: (_) => key.currentState?.clearAttachments(),
+          ),
+        );
+        // Two prompts, each with a different file.
+        for (final name in ['one.dart', 'two.dart']) {
+          key.currentState!.attachFile(FileInfo.fromPath('/tmp/$name'));
+          await tester.pump();
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.enter),
+          );
+          await tester.pump();
+        }
+        expect(history.texts, ['[one.dart] ', '[two.dart] ']);
+
+        // Recall to the newest, then one older.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowUp),
+        );
+        await tester.pump();
+        expect(controller.text, '[two.dart] ');
+        expect(
+          key.currentState!.getAttachedFiles().single.path,
+          '/tmp/two.dart',
+        );
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowUp),
+        );
+        await tester.pump();
+        expect(controller.text, '[one.dart] ');
+        expect(
+          key.currentState!.getAttachedFiles().single.path,
+          '/tmp/one.dart',
+        );
+
+        // Down returns to the newer entry with ITS file, not the older one.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowDown),
+        );
+        await tester.pump();
+        expect(controller.text, '[two.dart] ');
+        expect(
+          key.currentState!.getAttachedFiles().single.path,
+          '/tmp/two.dart',
+        );
+
+        // Past the newest entry the draft (empty here) is restored and the
+        // attachments are dropped.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowDown),
+        );
+        await tester.pump();
+        expect(controller.text, '');
+        expect(key.currentState!.getAttachedFiles(), isEmpty);
+      });
+
+      controller.dispose();
+    });
+
+    test('recalling an empty draft clears the recalled text', () async {
+      final history = PromptHistoryController();
+      final controller = TextEditingController();
+
+      await testNocterm('history empty draft', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            maxLines: 1,
+            promptHistory: history,
+            onSubmitted: (_) => controller.text = '',
+          ),
+        );
+        controller.text = 'first';
+        await tester.pump();
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+
+        // Up recalls, Down past the newest restores the empty draft.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowUp),
+        );
+        await tester.pump();
+        expect(controller.text, 'first');
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowDown),
+        );
+        await tester.pump();
+        expect(controller.text, '');
+
+        // A repeated Down is a no-op, not another draft restore.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowDown),
+        );
+        await tester.pump();
+        expect(controller.text, '');
+      });
+
+      controller.dispose();
+    });
+
+    test('recalled attachments stay deletable out of text order', () async {
+      final history = PromptHistoryController();
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('history recall order', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            maxLines: null,
+            promptHistory: history,
+            onSubmitted: (_) => key.currentState?.clearAttachments(),
+          ),
+        );
+        // Attach with the caret before existing text so the attachment order
+        // ends up reversed relative to the text order.
+        controller.text = 'some text';
+        await tester.pump();
+        controller.selection = const TextSelection.collapsed(offset: 9);
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/a.txt'));
+        await tester.pump();
+        controller.selection = const TextSelection.collapsed(offset: 0);
+        key.currentState!.attachFile(FileInfo.fromPath('/tmp/b.txt'));
+        await tester.pump();
+        // Attachments were added [a, b]; the text reads [b, a].
+        expect(controller.text, '[b.txt] some text [a.txt] ');
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+
+        // Recall both and check every token carries a range: Backspace must
+        // remove it as one unit.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowUp),
+        );
+        await tester.pump();
+        expect(controller.text, '[b.txt] some text [a.txt] ');
+        expect(key.currentState!.getAttachedFiles(), hasLength(2));
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowUp),
+        );
+        await tester.pump();
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowDown),
+        );
+        await tester.pump();
+
+        // Deleting from inside each label drops the whole token.
+        controller.selection = const TextSelection.collapsed(offset: 1);
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.backspace),
+        );
+        await tester.pump();
+        expect(controller.text.startsWith('some text'), isTrue);
+        expect(key.currentState!.getAttachedFiles(), hasLength(1));
+      });
+
+      controller.dispose();
+    });
+
+    test('a collapsed paste survives an up/down round trip', () async {
+      final history = PromptHistoryController();
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('history paste round trip', (tester) async {
+        // Multi-line: single-line fields flatten the newlines, so only the
+        // character threshold applies there. The clipboard is seeded inside
+        // the callback: testNocterm clears it on entry.
+        final long = List.generate(4, (i) => 'line $i').join('\n');
+        ClipboardManager.copy(long);
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            maxLines: null,
+            promptHistory: history,
+            onSubmitted: (_) => key.currentState?.clearAttachments(),
+          ),
+        );
+        // Paste over the collapse threshold, then submit so the history has
+        // an entry to browse to.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+        expect(controller.text, contains('Pasted ~4 lines'));
+        expect(key.currentState!.getPastedTexts(), [long]);
+
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+
+        // A second paste gives the field a collapsed paste of its own.
+        ClipboardManager.copy(long);
+        await tester.sendKeyEvent(
+          const KeyboardEvent(
+            logicalKey: LogicalKey.keyV,
+            modifiers: ModifierKeys(ctrl: true),
+          ),
+        );
+        await tester.pump();
+        expect(key.currentState!.getPastedTexts(), [long]);
+
+        // Up recalls the submitted prompt; the paste of the draft is not
+        // part of it. The caret starts at the text edge, so the first Up is
+        // history and not the boundary Home.
+        controller.selection = const TextSelection.collapsed(offset: 0);
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowUp),
+        );
+        await tester.pump();
+        expect(key.currentState!.getPastedTexts(), isEmpty);
+
+        // Down restores the draft — and its collapsed paste content.
+        controller.selection = TextSelection.collapsed(
+          offset: controller.text.length,
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowDown),
+        );
+        await tester.pump();
+        expect(controller.text, contains('Pasted ~4 lines'));
+        expect(key.currentState!.getPastedTexts(), [long]);
+
+        ClipboardManager.clear();
+      });
+
+      controller.dispose();
+    });
+
+    test('pushPrompt carries files', () async {
+      final history = PromptHistoryController();
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('history push files', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            maxLines: 1,
+            promptHistory: history,
+          ),
+        );
+        key.currentState!.pushPrompt(
+          'sent from a button',
+          files: [FileInfo.fromPath('/tmp/a.png')],
+        );
+        expect(history.items.single.files.single.path, '/tmp/a.png');
+
+        final recalled = history.moveUp(currentText: '');
+        expect(recalled?.entry?.files.single.path, '/tmp/a.png');
       });
 
       controller.dispose();

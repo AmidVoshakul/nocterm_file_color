@@ -1,8 +1,13 @@
-## Unreleased
+## 0.0.7
 
 ### Features
 
-- **Prompt history**: `FileTextField` stores submitted prompts and recalls them with ArrowUp/ArrowDown (readline edge-stepping: cursor snaps to the line edge first, then history; draft save/restore; consecutive dedup; capacity cap). In-memory by default, injectable `PromptHistoryStorage` (with a ready `FilePromptHistoryStorage` + `PromptHistoryCodec` JSONL) for persistence. `TokenHighlightTextField` stays coloring-only but the controller is exported for reuse.
+- **`FileChips`**: read-only chips row for attached files, as used at the end of a chat message — a colored `File`/`dir` label plate (from `FileConfig` or the theme) followed by a gray name plate (theme `surface`/`onSurface`), wrapped onto rows (or a single scrolling row). Per-item style override, `labelBuilder`, `nameTextColor`/`nameBackgroundColor`, `gap` and `onChipTap`; all colors honor `NO_COLOR`. `FileChipItem.file(...)`/`.directory(...)` build the items.
+- **Prompt history**: `FileTextField` stores submitted prompts and recalls them with ArrowUp/ArrowDown (readline edge-stepping: cursor snaps to the line edge first, then history; draft save/restore, including an empty draft; consecutive dedup; capacity cap). Attached files are carried with each entry, so recalling — and moving up or down between — entries restores their file tags and re-sending keeps them. In-memory by default, injectable `PromptHistoryStorage` (with a ready `FilePromptHistoryStorage` + `PromptHistoryCodec` JSONL) for persistence. `TokenHighlightTextField` stays coloring-only but the controller is exported for reuse.
+
+### Fixes
+
+- The collapsed `[Pasted ~N lines]` tag now uses dark text on its background like every other tag, instead of white on grey.
 
 ## 0.0.6
 

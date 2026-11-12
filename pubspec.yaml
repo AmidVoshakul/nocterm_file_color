@@ -1,11 +1,13 @@
 name: nocterm_file_color
 description: A Nocterm TextField wrapper that displays files and other tokens as colored inline tags.
-version: 0.0.6
+version: 0.0.7
 repository: https://github.com/AmidVoshakul/nocterm_file_color
 issue_tracker: https://github.com/AmidVoshakul/nocterm_file_color/issues
 homepage: https://github.com/AmidVoshakul/nocterm_file_color
 documentation: https://pub.dev/documentation/nocterm_file_color/latest/nocterm_file_color
 screenshots:
+  - description: "The composer demo: typing, the @ mention menu, an attached file and a collapsed paste tag"
+    path: screenshots/demo.gif
   - description: "A composer prompt with colored inline tokens"
     path: screenshots/input.png
   - description: "The same prompt with the @ mention menu open"

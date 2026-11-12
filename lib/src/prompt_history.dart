@@ -4,6 +4,35 @@ import 'dart:io';
 
 import 'package:nocterm/nocterm.dart';
 
+import 'file_info.dart';
+
+/// One stored prompt: its text and the files attached when it was sent.
+///
+/// Attachments are carried so that recalling a prompt restores its files
+/// together with the text — re-sending a recalled prompt keeps the files.
+class PromptHistoryEntry {
+  const PromptHistoryEntry({required this.text, this.files = const []});
+
+  final String text;
+  final List<FileInfo> files;
+  @override
+  bool operator ==(Object other) =>
+      other is PromptHistoryEntry &&
+      other.text == text &&
+      _listEquals(other.files, files);
+
+  @override
+  int get hashCode => Object.hash(text, Object.hashAll(files));
+}
+
+bool _listEquals<T>(List<T> a, List<T> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
 /// Immutable state for a prompt-history ring.
 ///
 /// [items] holds past prompts oldest-first (capped by the controller).
@@ -15,12 +44,12 @@ import 'package:nocterm/nocterm.dart';
 class PromptHistoryState {
   const PromptHistoryState({required this.items, this.index, this.draft = ''});
 
-  final List<String> items;
+  final List<PromptHistoryEntry> items;
   final int? index;
   final String draft;
 
   PromptHistoryState copyWith({
-    List<String>? items,
+    List<PromptHistoryEntry>? items,
     int? index,
     String? draft,
     bool clearIndex = false,
@@ -41,14 +70,6 @@ class PromptHistoryState {
 
   @override
   int get hashCode => Object.hash(draft, index, Object.hashAll(items));
-
-  static bool _listEquals(List<String> a, List<String> b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
 }
 
 /// Persistence contract for a prompt-history ring.
@@ -60,13 +81,13 @@ class PromptHistoryState {
 abstract class PromptHistoryStorage {
   /// Loads stored entries (oldest-first). Returns an empty list when there
   /// is nothing stored or the read fails.
-  Future<List<String>> load();
+  Future<List<PromptHistoryEntry>> load();
 
   /// Appends a single entry. Best-effort; failures are swallowed.
-  Future<void> append(String entry);
+  Future<void> append(PromptHistoryEntry entry);
 
   /// Rewrites the whole store (used for trimming and self-healing). Best-effort.
-  Future<void> rewrite(List<String> items);
+  Future<void> rewrite(List<PromptHistoryEntry> items);
 }
 
 /// In-memory storage that keeps nothing: load returns empty, append/rewrite
@@ -75,17 +96,18 @@ class InMemoryPromptHistoryStorage implements PromptHistoryStorage {
   const InMemoryPromptHistoryStorage();
 
   @override
-  Future<List<String>> load() async => const <String>[];
+  Future<List<PromptHistoryEntry>> load() async => const [];
 
   @override
-  Future<void> append(String entry) async {}
+  Future<void> append(PromptHistoryEntry entry) async {}
 
   @override
-  Future<void> rewrite(List<String> items) async {}
+  Future<void> rewrite(List<PromptHistoryEntry> items) async {}
 }
 
-/// File-backed storage that persists entries as JSONL (one `{"input": ...}`
-/// object per line). The host owns the path; the package only writes to it.
+/// File-backed storage that persists entries as JSONL (one
+/// `{"input": ..., "files": [...]}` object per line). The host owns the path;
+/// the package only writes to it.
 ///
 /// The path is trusted input (host-provided). It is normalized for traversal
 /// safety in debug builds.
@@ -95,19 +117,19 @@ class FilePromptHistoryStorage implements PromptHistoryStorage {
   final String path;
 
   @override
-  Future<List<String>> load() async {
+  Future<List<PromptHistoryEntry>> load() async {
     try {
       final file = File(path);
-      if (!file.existsSync()) return const <String>[];
+      if (!file.existsSync()) return const [];
       final lines = await file.readAsLines();
       return PromptHistoryCodec.decode(lines.join('\n'));
     } on Exception {
-      return const <String>[];
+      return const [];
     }
   }
 
   @override
-  Future<void> append(String entry) async {
+  Future<void> append(PromptHistoryEntry entry) async {
     try {
       final file = File(path);
       await file.parent.create(recursive: true);
@@ -121,7 +143,7 @@ class FilePromptHistoryStorage implements PromptHistoryStorage {
   }
 
   @override
-  Future<void> rewrite(List<String> items) async {
+  Future<void> rewrite(List<PromptHistoryEntry> items) async {
     try {
       final file = File(path);
       await file.parent.create(recursive: true);
@@ -136,13 +158,14 @@ class FilePromptHistoryStorage implements PromptHistoryStorage {
   }
 }
 
-/// JSONL codec for prompt-history entries, matching the chatorai/opencode
-/// format (`{"input": "..."}` per line). Keeps storage implementations dumb.
+/// JSONL codec for prompt-history entries. Each line is one object; `files`
+/// is optional so older `{"input": ...}` lines still load. Keeps storage
+/// implementations dumb.
 class PromptHistoryCodec {
   const PromptHistoryCodec._();
 
   /// Serializes a list of entries to JSONL.
-  static String encode(List<String> items) {
+  static String encode(List<PromptHistoryEntry> items) {
     final buffer = StringBuffer();
     for (final item in items) {
       buffer.writeln(encodeEntry(item));
@@ -151,12 +174,19 @@ class PromptHistoryCodec {
   }
 
   /// Serializes a single entry to one JSONL line.
-  static String encodeEntry(String input) => jsonEncode({'input': input});
+  static String encodeEntry(PromptHistoryEntry entry) {
+    return jsonEncode({
+      'input': entry.text,
+      if (entry.files.isNotEmpty)
+        'files': [for (final file in entry.files) _encodeFile(file)],
+    });
+  }
 
-  /// Parses JSONL into a list of prompt strings. Broken/empty/non-JSON
-  /// lines are skipped; empty `input` values are filtered out.
-  static List<String> decode(String text) {
-    final result = <String>[];
+  /// Parses JSONL into a list of entries. Broken/empty/non-JSON lines are
+  /// skipped; empty `input` values are filtered out. Files missing from a
+  /// line load as an empty list (older format).
+  static List<PromptHistoryEntry> decode(String text) {
+    final result = <PromptHistoryEntry>[];
     for (final raw in text.split('\n')) {
       final line = raw.trim();
       if (line.isEmpty) continue;
@@ -164,9 +194,17 @@ class PromptHistoryCodec {
         final decoded = jsonDecode(line);
         if (decoded is! Map<String, dynamic>) continue;
         final input = decoded['input'];
-        if (input is String && input.trim().isNotEmpty) {
-          result.add(input);
+        if (input is! String || input.trim().isEmpty) continue;
+        final filesJson = decoded['files'];
+        final files = <FileInfo>[];
+        if (filesJson is List) {
+          for (final item in filesJson) {
+            if (item is Map<String, dynamic>) {
+              files.add(_decodeFile(item));
+            }
+          }
         }
+        result.add(PromptHistoryEntry(text: input, files: files));
       } on FormatException {
         // skip broken JSON
       } on TypeError {
@@ -175,24 +213,53 @@ class PromptHistoryCodec {
     }
     return result;
   }
+
+  static Map<String, dynamic> _encodeFile(FileInfo file) => {
+    'path': file.path,
+    'name': file.name,
+    'extension': file.extension,
+    'type': file.type.name,
+    if (file.size != null) 'size': file.size,
+  };
+
+  static FileInfo _decodeFile(Map<String, dynamic> map) {
+    final path = map['path'] is String ? map['path'] as String : '';
+    final name = map['name'] is String ? map['name'] as String : '';
+    final extension = map['extension'] is String
+        ? map['extension'] as String
+        : (name.contains('.') ? name.split('.').last.toLowerCase() : '');
+    return FileInfo(
+      // Keep the stored path/name/type: images carry a label (`image 1`) as
+      // their name, so re-deriving from the path would lose it.
+      path: path,
+      name: name,
+      extension: extension,
+      type: FileType.values.firstWhere(
+        (type) => type.name == map['type'],
+        orElse: () => FileType.other,
+      ),
+      size: map['size'] is int ? map['size'] as int : null,
+    );
+  }
 }
 
 const _defaultCapacity = 500;
 
-/// Creates an initial [PromptHistoryState] from raw items.
+/// Creates an initial [PromptHistoryState] from raw entries.
 ///
-/// - Filters out empty/whitespace-only strings.
-/// - Deduplicates consecutive equal items (comparison normalized by trim).
-/// - Trims to the last [_defaultCapacity] entries.
+/// - Filters out empty/whitespace-only texts.
+/// - Deduplicates consecutive equal entries (comparison normalized by trim).
+/// - Trims to the last [maxCapacity] entries.
 /// - Resets navigation (`index`/`draft`).
 PromptHistoryState createHistory(
-  List<String> items, {
+  List<PromptHistoryEntry> items, {
   int maxCapacity = _defaultCapacity,
 }) {
-  final filtered = <String>[];
+  final filtered = <PromptHistoryEntry>[];
   for (final item in items) {
-    if (item.trim().isEmpty) continue;
-    if (filtered.isNotEmpty && filtered.last.trim() == item.trim()) continue;
+    if (item.text.trim().isEmpty) continue;
+    final last = filtered.isEmpty ? null : filtered.last;
+    if (last != null && last.text.trim() == item.text.trim()) continue;
     filtered.add(item);
   }
   final trimmed = filtered.length > maxCapacity
@@ -203,38 +270,54 @@ PromptHistoryState createHistory(
 
 /// Pushes a new entry onto the history ring.
 ///
-/// - Ignores empty/whitespace-only strings.
-/// - Deduplicates against the last item (comparison normalized by trim).
+/// - Ignores empty/whitespace-only texts.
+/// - Deduplicates against the last entry (comparison normalized by trim).
 /// - Trims to [maxCapacity] entries.
 /// - Resets navigation (`index`/`draft`).
 PromptHistoryState pushHistory(
   PromptHistoryState state,
-  String entry, {
+  PromptHistoryEntry entry, {
   int maxCapacity = _defaultCapacity,
 }) {
-  if (entry.trim().isEmpty) return state;
+  if (entry.text.trim().isEmpty) return state;
 
   final last = state.items.isNotEmpty ? state.items.last : null;
-  if (last != null && last.trim() == entry.trim()) {
+  if (last != null && last.text.trim() == entry.text.trim()) {
     return PromptHistoryState(items: state.items, index: null, draft: '');
   }
 
-  final next = List<String>.from(state.items)..add(entry);
+  final next = List<PromptHistoryEntry>.from(state.items)..add(entry);
   if (next.length > maxCapacity) {
     next.removeRange(0, next.length - maxCapacity);
   }
   return PromptHistoryState(items: next, index: null, draft: '');
 }
 
-/// Result of a navigation move.
-class HistoryMoveResult {
-  const HistoryMoveResult(this.state, this.text);
+/// Result of a navigation move: either a stored entry (with its attachments)
+/// or the restored draft text.
+class PromptHistoryMove {
+  const PromptHistoryMove.entry(this.entry) : draft = null;
+  const PromptHistoryMove.draft(this.draft) : entry = null;
 
-  final PromptHistoryState state;
-  final String? text;
+  final PromptHistoryEntry? entry;
+
+  /// Non-null when navigation moved past the newest entry into the draft.
+  /// May be an empty string (an empty draft).
+  final String? draft;
+
+  /// The text the field should show.
+  String get text => entry?.text ?? draft ?? '';
 }
 
-HistoryMoveResult _moveUp(PromptHistoryState state, String text) {
+/// Result of a pure state navigation move.
+class HistoryMoveResult {
+  const HistoryMoveResult(this.state, this.entry);
+
+  final PromptHistoryState state;
+  final PromptHistoryEntry? entry;
+}
+
+HistoryMoveResult _moveUp(PromptHistoryState state, String currentText) {
   if (state.items.isEmpty) return HistoryMoveResult(state, null);
 
   final nextIndex = state.index == null
@@ -242,7 +325,7 @@ HistoryMoveResult _moveUp(PromptHistoryState state, String text) {
       : state.index! - 1;
   if (nextIndex < 0) return HistoryMoveResult(state, null);
 
-  final draft = state.index == null ? text : state.draft;
+  final draft = state.index == null ? currentText : state.draft;
   return HistoryMoveResult(
     state.copyWith(index: nextIndex, draft: draft),
     state.items[nextIndex],
@@ -257,7 +340,7 @@ HistoryMoveResult _moveDown(PromptHistoryState state) {
   if (nextIndex >= state.items.length) {
     return HistoryMoveResult(
       PromptHistoryState(items: state.items, index: null, draft: state.draft),
-      state.draft,
+      null,
     );
   }
 
@@ -268,9 +351,6 @@ HistoryMoveResult _moveDown(PromptHistoryState state) {
 }
 
 /// Moves one step up in history (toward older entries).
-///
-/// Returns the updated state. The displayed text is [result.text] (null when
-/// navigation is not applicable).
 PromptHistoryState moveHistoryUpState(PromptHistoryState state, String text) {
   return _moveUp(state, text).state;
 }
@@ -310,7 +390,12 @@ class PromptHistoryController extends ChangeNotifier {
 
   Future<void>? _loadFuture;
 
-  List<String> get items => List.unmodifiable(state.items);
+  /// The stored entries, oldest-first.
+  List<PromptHistoryEntry> get items => List.unmodifiable(state.items);
+
+  /// The stored texts, oldest-first (convenience for display).
+  List<String> get texts =>
+      List.unmodifiable([for (final item in state.items) item.text]);
 
   /// Loads entries from [storage] (if any) and applies filtering/dedup/cap.
   /// Idempotent and concurrency-safe: repeated calls share one future.
@@ -324,7 +409,7 @@ class PromptHistoryController extends ChangeNotifier {
   Future<void> _doLoad() async {
     try {
       final loaded = await storage!.load();
-      final merged = <String>[...loaded, ...state.items];
+      final merged = <PromptHistoryEntry>[...loaded, ...state.items];
       state = createHistory(merged, maxCapacity: maxCapacity);
       await storage!.rewrite(state.items);
     } on Exception {
@@ -333,29 +418,40 @@ class PromptHistoryController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Appends [entry] unless it is blank, filtered out, or duplicates the
-  /// newest item. Resets any in-progress navigation.
-  void push(String entry) {
-    if (entry.trim().isEmpty) return;
-    if (filter != null && !filter!(entry)) return;
+  /// Appends [text] with its [files] unless the text is blank, filtered out,
+  /// or duplicates the newest entry. Resets any in-progress navigation.
+  ///
+  /// Deduplication compares text only, so re-sending the same text with
+  /// different files keeps the files stored with the first entry.
+  void push(String text, {List<FileInfo> files = const []}) {
+    if (text.trim().isEmpty) return;
+    if (filter != null && !filter!(text)) return;
 
     final lastBefore = state.items.isNotEmpty ? state.items.last : null;
-    final appended = lastBefore == null || lastBefore.trim() != entry.trim();
+    final appended =
+        lastBefore == null || lastBefore.text.trim() != text.trim();
 
     final previousLength = state.items.length;
-    state = pushHistory(state, entry, maxCapacity: maxCapacity);
+    state = pushHistory(
+      state,
+      PromptHistoryEntry(text: text, files: List.unmodifiable(files)),
+      maxCapacity: maxCapacity,
+    );
     final trimmed = state.items.length < previousLength + (appended ? 1 : 0);
     if (appended) {
-      if (trimmed) {
-        unawaited(_rewriteBestEffort(state.items));
-      } else {
-        unawaited(_appendBestEffort(entry));
+      final entry = state.items.isEmpty ? null : state.items.last;
+      if (entry != null) {
+        if (trimmed) {
+          unawaited(_rewriteBestEffort(state.items));
+        } else {
+          unawaited(_appendBestEffort(entry));
+        }
       }
     }
     notifyListeners();
   }
 
-  Future<void> _rewriteBestEffort(List<String> items) async {
+  Future<void> _rewriteBestEffort(List<PromptHistoryEntry> items) async {
     try {
       await storage?.rewrite(items);
     } on Exception {
@@ -363,7 +459,7 @@ class PromptHistoryController extends ChangeNotifier {
     }
   }
 
-  Future<void> _appendBestEffort(String entry) async {
+  Future<void> _appendBestEffort(PromptHistoryEntry entry) async {
     try {
       await storage?.append(entry);
     } on Exception {
@@ -372,24 +468,28 @@ class PromptHistoryController extends ChangeNotifier {
   }
 
   /// Steps one entry back, saving [currentText] as the draft on the first
-  /// step. Returns the entry text to display, or null when navigation is
-  /// not applicable.
-  String? moveUp({required String currentText}) {
+  /// step. Returns the entry to display (with its files), or null when
+  /// navigation is not applicable — in which case nothing is notified.
+  PromptHistoryMove? moveUp({required String currentText}) {
     final result = moveHistoryUpResult(state, currentText);
-    if (result.text == null) return null;
+    if (result.entry == null) return null;
     state = result.state;
     notifyListeners();
-    return result.text;
+    return PromptHistoryMove.entry(result.entry!);
   }
 
-  /// Steps one entry forward, restoring the saved draft past the newest
-  /// entry. Returns the text to display, or null when already at the end.
-  String? moveDown() {
+  /// Steps one entry forward, restoring the saved draft (which may be empty)
+  /// past the newest entry. Returns null when already at the end — in which
+  /// case nothing is notified, so repeated presses do not repeat the draft.
+  PromptHistoryMove? moveDown() {
+    if (state.index == null || state.items.isEmpty) return null;
     final result = moveHistoryDownResult(state);
-    if (result.text == null) return null;
     state = result.state;
     notifyListeners();
-    return result.text;
+    final entry = result.entry;
+    if (entry != null) return PromptHistoryMove.entry(entry);
+    // Past the newest entry: the draft (kept by the transition) is restored.
+    return PromptHistoryMove.draft(state.draft);
   }
 
   /// Drops the browse position and draft, keeping stored entries.
@@ -404,7 +504,7 @@ class PromptHistoryController extends ChangeNotifier {
     state = const PromptHistoryState(items: [], index: null, draft: '');
     _loadFuture = null;
     try {
-      await storage?.rewrite(const <String>[]);
+      await storage?.rewrite(const []);
     } on Exception {
       // Best-effort.
     }

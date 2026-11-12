@@ -21,6 +21,7 @@ The approach is a **widget wrapper `FileTextField`** (NOT a fork of Nocterm). Wr
 - `FileDetector` - determining the file type by extension → `detectType(extension)`.
 - `FileInfo` - model: `path`, `name`, `extension`, `type`, `size`.
 - `FileOpener` - cross-platform opening of a file location in the OS (`xdg-open`/`open`/`explorer`).
+- `FileChips` — read-only attachment chips for chat messages (colored label plate + gray name plate), with `FileChipItem.file`/`.directory`, `FileConfig`/theme colors and `NO_COLOR` support.
 - `FileSystemCache` - LRU+TTL directory listings with a batched tree walk.
 - `TerminalColors` - `NO_COLOR` support shared by the package's colour output.
 
@@ -43,6 +44,7 @@ lib/
     terminal_colors.dart # NO_COLOR support for the package's colours
     prompt_history.dart # prompt history state, storage, controller, codec
     prompt_edge_step.dart # pure readline edge-stepping helpers
+    file_chips.dart # read-only attachment chips for chat messages
     file_text_field_suggestion.dart # @/ menu model + kinds + defaults
     suggestion_menu_style.dart # style of the built-in menu
     cursor_blink_mixin.dart # shared caret blink for overlay fields

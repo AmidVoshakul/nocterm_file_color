@@ -154,7 +154,7 @@ class FileTextField extends StatefulComponent {
     this.pasteCollapseMinLines = 3,
     this.pasteCollapseMinChars = 150,
     this.pasteStyle = const FileStyle(
-      text: Colors.brightWhite,
+      text: Colors.black,
       background: Colors.grey,
       bold: true,
     ),
@@ -320,6 +320,10 @@ class FileTextFieldState extends State<FileTextField>
   PromptHistoryController? _promptHistory;
   bool _promptHistoryIsInternal = false;
   bool _historyNavigating = false;
+
+  /// The prompt browsed away from on the first history step: its text and
+  /// collapsed pastes, so a draft restore can bring the pastes back.
+  (String text, List<String> pastes)? _draftSnapshot;
   final List<FileInfo> _attachedFiles = [];
   final List<_InlineToken> _inlineTokens = [];
   String? _activeTrigger;
@@ -343,9 +347,9 @@ class FileTextFieldState extends State<FileTextField>
   /// The prompt history controller backing this field, if any.
   PromptHistoryController? get promptHistory => _promptHistory;
 
-  /// Returns the stored prompt history entries (oldest-first).
+  /// Returns the stored prompt history texts (oldest-first).
   List<String> getPromptHistory() =>
-      List.unmodifiable(_promptHistory?.items ?? const []);
+      List.unmodifiable(_promptHistory?.texts ?? const []);
 
   /// Clears the stored prompt history (in-memory and, if configured, on disk).
   Future<void> clearPromptHistory() =>
@@ -353,7 +357,8 @@ class FileTextFieldState extends State<FileTextField>
 
   /// Pushes [text] onto the prompt history manually (e.g. when submit
   /// happens outside the field). No-op for empty/filtered/duplicate entries.
-  void pushPrompt(String text) => _promptHistory?.push(text);
+  void pushPrompt(String text, {List<FileInfo> files = const []}) =>
+      _promptHistory?.push(text, files: files);
 
   /// Navigation helpers for directory browsing
   int get navigationDepth => _navStack.length;
@@ -447,6 +452,97 @@ class FileTextFieldState extends State<FileTextField>
       _attachedFiles.add(named);
       _insertToken(named, style: fileStyle);
     }
+  }
+
+  /// Restores attachments whose tokens are already present in the text (a
+  /// recalled history entry), without inserting anything. An empty list drops
+  /// the current attachments (recalling an empty draft). The token styles
+  /// come from the current [fileConfig], so colors stay consistent.
+  ///
+  /// [pastedTexts] re-creates collapsed paste tokens when a draft is
+  /// restored, so browsing away from and back to a collapsed paste keeps
+  /// its content.
+  void _restoreAttachments(
+    List<FileInfo> files, {
+    List<String> pastedTexts = const [],
+  }) {
+    final hadTokens = _inlineTokens.isNotEmpty || _attachedFiles.isNotEmpty;
+    final hadPasted = _inlineTokens.any((token) => token.isPasted);
+    _inlineTokens.clear();
+    _attachedFiles.clear();
+    for (final file in files) {
+      final style = _styleFor(file);
+      _attachedFiles.add(file);
+      _inlineTokens.add(
+        _InlineToken(
+          token: FileTag.tokenFor(file, style),
+          style: style,
+          file: file,
+        ),
+      );
+    }
+    for (final pasted in pastedTexts) {
+      _inlineTokens.add(
+        _InlineToken(
+          token: pasteTagFor(pasted),
+          style: component.pasteStyle,
+          pastedText: pasted,
+        ),
+      );
+    }
+    _anchorRestoredTokens(_controller.text);
+    setState(() {});
+    if (hadTokens || files.isNotEmpty || pastedTexts.isNotEmpty) {
+      _notifyFilesChanged();
+    }
+    if (hadPasted || pastedTexts.isNotEmpty) {
+      _notifyPastedChanged();
+    }
+  }
+
+  /// Relocates each restored token to an occurrence no other token claims,
+  /// independent of list order: the order attachments were stored in need
+  /// not match the order they appear in the recalled text, and a token
+  /// without a range cannot be removed as one unit.
+  void _anchorRestoredTokens(String text) {
+    final claimed = <(int, int)>[];
+    for (var index = 0; index < _inlineTokens.length; index++) {
+      final token = _inlineTokens[index];
+      var start = text.indexOf(token.token);
+      while (start >= 0 &&
+          claimed.any(
+            (range) =>
+                start < range.$2 && start + token.token.length > range.$1,
+          )) {
+        start = text.indexOf(token.token, start + 1);
+      }
+      if (start < 0) continue;
+      final end = start + token.token.length;
+      _inlineTokens[index] = token.withRange(start, end);
+      claimed.add((start, end));
+    }
+  }
+
+  /// Applies a recalled history move: text, caret, and attachments together.
+  ///
+  /// [draftPastes] re-creates collapsed paste tokens when a draft is
+  /// restored. [_historyNavigating] is re-armed around each controller
+  /// mutation because the text and selection setters notify the listener
+  /// separately.
+  void _applyHistoryMove(
+    PromptHistoryMove move, {
+    List<String> draftPastes = const [],
+  }) {
+    final text = move.text;
+    _historyNavigating = true;
+    _controller.text = text;
+    _historyNavigating = true;
+    _controller.selection = TextSelection.collapsed(offset: text.length);
+    _historyNavigating = false;
+    _restoreAttachments(
+      move.entry?.files ?? const [],
+      pastedTexts: move.entry == null ? draftPastes : const [],
+    );
   }
 
   /// The lowest image label number not yet taken by an attached image.
@@ -811,6 +907,7 @@ class FileTextFieldState extends State<FileTextField>
     placeCaretInView();
     resetViewportTargetColumn();
     if (!_historyNavigating) {
+      _draftSnapshot = null;
       _promptHistory?.resetNavigation();
     }
     _historyNavigating = false;
@@ -936,16 +1033,24 @@ class FileTextFieldState extends State<FileTextField>
 
   void _attachPastedText(String pastedText) {
     setState(() {
-      final style = component.pasteStyle;
-      final lineCount = pastedText.split('\n').length;
-      final label = lineCount == 1 ? 'line' : 'lines';
-      final token =
-          '${style.openingDelimiter}Pasted ~$lineCount $label${style.closingDelimiter}';
       _insertInlineToken(
-        _InlineToken(token: token, style: style, pastedText: pastedText),
+        _InlineToken(
+          token: pasteTagFor(pastedText),
+          style: component.pasteStyle,
+          pastedText: pastedText,
+        ),
       );
       _notifyPastedChanged();
     });
+  }
+
+  /// The collapsed-paste label for [pastedText], shared by insertion and
+  /// history recall so both agree byte-for-byte.
+  String pasteTagFor(String pastedText) {
+    final style = component.pasteStyle;
+    final lineCount = pastedText.split('\n').length;
+    final label = lineCount == 1 ? 'line' : 'lines';
+    return '${style.openingDelimiter}Pasted ~$lineCount $label${style.closingDelimiter}';
   }
 
   void _notifyPastedChanged() {
@@ -1005,24 +1110,24 @@ class FileTextFieldState extends State<FileTextField>
                             lines.length - 1 &&
                         offset == _controller.text.length)));
       if (atEdge) {
-        final result = isUp
-            ? _promptHistory!.moveUp(currentText: _controller.text)
-            : _promptHistory!.moveDown();
-        if (result != null) {
-          _historyNavigating = true;
-          _controller.text = result;
-          _historyNavigating = true;
-          _controller.selection = TextSelection.collapsed(
-            offset: result.length,
-          );
-          // History stores text only: attachments are not restored, so drop
-          // the stale tokens without re-parsing the recalled tags.
-          if (_inlineTokens.isNotEmpty || _attachedFiles.isNotEmpty) {
-            _inlineTokens.clear();
-            _attachedFiles.clear();
-            _notifyFilesChanged();
+        final history = _promptHistory!;
+        // On the first step, snapshot the prompt being browsed away from so
+        // a collapsed paste survives the round trip back to the draft.
+        final move = isUp
+            ? history.moveUp(currentText: _controller.text)
+            : history.moveDown();
+        if (move != null) {
+          if (history.state.index != null && _draftSnapshot == null) {
+            _draftSnapshot = (_controller.text, getPastedTexts());
           }
-          _historyNavigating = false;
+          final draftPastes =
+              move.entry == null &&
+                  _draftSnapshot != null &&
+                  _draftSnapshot!.$1 == move.text
+              ? _draftSnapshot!.$2
+              : const <String>[];
+          _applyHistoryMove(move, draftPastes: draftPastes);
+          if (move.entry == null) _draftSnapshot = null;
           return true;
         }
       }
@@ -1538,7 +1643,10 @@ class FileTextFieldState extends State<FileTextField>
               final expanded = getExpandedText();
               final history = _promptHistory;
               if (history != null && expanded.trim().isNotEmpty) {
-                history.push(expanded);
+                history.push(
+                  expanded,
+                  files: List<FileInfo>.from(getAttachedFiles()),
+                );
               }
               history?.resetNavigation();
               component.onSubmitted!(expanded);

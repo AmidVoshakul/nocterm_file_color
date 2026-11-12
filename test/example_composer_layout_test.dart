@@ -229,5 +229,36 @@ void main() {
         expect(inputRow - lastMenuRow - 1, 2);
       });
     });
+
+    test('a picked folder renders a dir chip in the sent message', () async {
+      await testNocterm('demo dir chip', (tester) async {
+        await tester.pumpComponent(const example.ComposerDemo());
+        await tester.pump();
+        // Narrow the menu to the lib folder row.
+        await tester.enterText('@lib');
+        await tester.pump();
+
+        final folderRow = RegExp(r'/\s+folder');
+        final lines = tester.terminalState.getText().split('\n');
+        expect(
+          lines.any(folderRow.hasMatch),
+          isTrue,
+          reason: 'the narrowed menu shows the lib folder',
+        );
+
+        // Select the folder, then send the prompt; the folder rides along as
+        // a directory chip.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.enter),
+        );
+        await tester.pump();
+
+        expect(tester.terminalState.getText(), contains('dir'));
+      });
+    });
   });
 }

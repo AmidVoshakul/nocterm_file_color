@@ -12,12 +12,9 @@
 A Nocterm `TextField` wrapper that displays attached files and colored tokens
 inline in the input line.
 
-![A composer prompt with colored inline tokens: a pasted file and an agent
-mention shown as colored tags, plus the agent and model line below the
-input](https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/screenshots/input.png)
-
-![The same prompt with the @ mention menu open above it: files, folders, and
-subagents listed with a keyboard-highlighted row](https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/screenshots/input-menu.png)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/screenshots/demo.gif" alt="Demo: typing a prompt, opening the @ mention menu, attaching a file and pasting a multi-line log that collapses into a single tag" width="640">
+</p>
 
 The `FileTextField` wraps the standard `TextField` and keeps its plain-text
 `TextEditingController` value. Paste or mention a file, folder, agent, command and it becomes a
@@ -26,12 +23,16 @@ colored tag (`[lib/main.dart]`, `[image 1]`, `[image 2]`, `[lib/]`, `@agent`, `/
 and `/` menus are either drawn by the package or handed to your own layout.
 Everything attached stays available through `getAttachedFiles()`.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/screenshots/input.png" alt="A composer prompt with colored inline tokens: a pasted file and an agent mention shown as colored tags, plus the agent and model line below the input" width="640">
+</p>
+
 ## 🚀 Getting Started
 
 ```yaml
 dependencies:
   nocterm: ^0.9.0
-  nocterm_file_color: ^0.0.6
+  nocterm_file_color: ^0.0.7
 ```
 
 ## Usage
@@ -108,6 +109,24 @@ FileTextField(
 );
 ```
 
+## Attachment chips
+
+Render the files attached to a sent message as chips at the end of the message
+text: a colored `File`/`dir` label plate followed by a gray name plate. Colors
+come from your `FileConfig` and the Nocterm theme, and honor `NO_COLOR`.
+
+```dart
+FileChips(
+  items: [
+    for (final file in files) FileChipItem.file(file),
+    FileChipItem.directory('lib/'),
+  ],
+);
+```
+
+Set `labelBuilder`, `nameTextColor`/`nameBackgroundColor`, `config`, `gap`,
+`wrap` and `onChipTap` to fit your chat UI.
+
 ## Pasting
 
 Pastes of 3+ lines or 150+ characters collapse into a `[Pasted ~N lines]`
@@ -157,6 +176,10 @@ By default `FileTextField` paints a neutral menu directly above the input.
 Replace it in place with `suggestionMenuBuilder`, or drop it entirely with
 `SuggestionMenuPlacement.host` and draw it wherever your layout needs — for
 instance as a separate panel above your own prompt container.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/AmidVoshakul/nocterm_file_color/HEAD/screenshots/input-menu.png" alt="The same prompt with the @ mention menu open above it: files, folders, and subagents listed with a keyboard-highlighted row" width="640">
+</p>
 
 ```dart
 class MyComposer extends StatefulComponent {
@@ -245,9 +268,11 @@ pull request guidelines.
 
 ## ⚖️ License
 
-[MIT](LICENSE)
+Distributed under the MIT License. See [`LICENSE`](LICENSE) for details.
 
-<div align="center">
+---
+
+<div align="right">
 
 Created by [Amid Voshakul 🌠](https://github.com/AmidVoshakul)
 

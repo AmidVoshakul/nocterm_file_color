@@ -35,22 +35,39 @@ class ComposerDemo extends StatefulComponent {
 }
 
 // ---------------------------------------------------------------------------
+// Chat message model
+// ---------------------------------------------------------------------------
+
+class _ChatMessage {
+  const _ChatMessage({
+    required this.text,
+    required this.chips,
+    required this.agentIndex,
+  });
+
+  final String text;
+  final List<FileChipItem> chips;
+  final int agentIndex;
+}
+
+// ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
 class _ComposerDemoState extends State<ComposerDemo> {
-  // -- Palette --
+  // -- Palette --------------------------------------------------------------
 
   static final _windowColor = const Color.fromRGB(3, 3, 4);
-  static final _menuColor = const Color.fromRGB(24, 24, 27);
-  static final _promptColor = const Color.fromRGB(25, 26, 27);
+  static final _menuColor = const Color.fromRGB(34, 35, 36);
+  static final _promptColor = const Color.fromRGB(34, 35, 36);
+  static final _messageCardColor = const Color.fromRGB(21, 22, 23);
   static final _hoverColor = const Color.fromRGB(46, 46, 52);
   static final _borderColor = const Color.fromRGB(46, 46, 50);
   static final _dimColor = const Color.fromRGB(98, 104, 117);
   static final _textColor = const Color.fromRGB(200, 200, 204);
   static final _variantColor = const Color.fromRGB(230, 199, 106);
 
-  // -- Input --
+  // -- Input ----------------------------------------------------------------
 
   final _controller = TextEditingController();
 
@@ -69,7 +86,18 @@ class _ComposerDemoState extends State<ComposerDemo> {
   /// Row the mouse hovers, or -1. Keyboard highlighting lives in the widget.
   int _menuHoverIndex = -1;
 
-  // -- Agent --
+  /// Sent messages, rendered as cards above the composer.
+  final List<_ChatMessage> _messages = [];
+
+  /// Directories picked from the menu for the prompt being composed. The
+  /// field inserts folders as inline tokens (not attachments), so the demo
+  /// tracks them here to render directory chips in the sent message.
+  final List<FileChipItem> _pickedFolders = [];
+
+  /// Keeps the transcript pinned to the newest message.
+  final _scrollController = AutoScrollController();
+
+  // -- Agent ----------------------------------------------------------------
 
   static const _agents = ['Plan', 'Build', 'Ask'];
 
@@ -82,22 +110,23 @@ class _ComposerDemoState extends State<ComposerDemo> {
   String get _currentAgent => _agents[_agentIndex];
   Color get _agentColor => _agentColors[_agentIndex];
 
-  // -- Model shown on the agent line --
+  // -- Model shown on the agent line -----------------------------------------
 
   static const _modelName = 'Muse Glimmer 30B';
   static const _modelProvider = 'NVIDIA NIM';
   static const _variantLabel = 'max';
 
-  // -- Lifecycle --
+  // -- Lifecycle -------------------------------------------------------------
 
   @override
   void dispose() {
     _controller.dispose();
     _promptHistory.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
-  // -- Exit --
+  // -- Exit ------------------------------------------------------------------
 
   /// Restores the terminal line discipline, then quits via
   /// [ComposerDemo.onQuit].
@@ -116,7 +145,7 @@ class _ComposerDemoState extends State<ComposerDemo> {
     component.onQuit();
   }
 
-  // -- Suggestions provider --
+  // -- Suggestions provider ---------------------------------------------------
 
   /// Feeds the `@` and `/` menus. The field filters the result case
   /// insensitively on `name` and `searchText`; colors set here dress the
@@ -222,6 +251,7 @@ class _ComposerDemoState extends State<ComposerDemo> {
   }
 
   // -- Mention menu -----------------------------------------------------------
+
   // Rendered as its own panel above the prompt instead of inside the field, so
   // the prompt keeps its bar. [FileTextFieldState] supplies the rows, the
   // highlighted index and programmatic selection.
@@ -321,7 +351,6 @@ class _ComposerDemoState extends State<ComposerDemo> {
         onTap: () => _fieldKey.currentState?.selectSuggestion(suggestion),
         child: Container(
           color: highlighted ? _hoverColor : null,
-          padding: const EdgeInsets.symmetric(horizontal: 1),
           child: Row(
             children: [
               // Left: display label — up to 2 lines, then ellipsis. Wider column.
@@ -351,7 +380,37 @@ class _ComposerDemoState extends State<ComposerDemo> {
     );
   }
 
+  // -- Messages --------------------------------------------------------------
+
+  // Sent messages render as cards with the agent's left border color; attached
+  // files show as colored chips at the end of the message text.
+
+  Component _buildMessageCard(_ChatMessage msg) {
+    final borderColor = _agentColors[msg.agentIndex];
+    return Container(
+      decoration: BoxDecoration(
+        color: _messageCardColor,
+        border: BoxBorder(left: BorderSide(color: borderColor, width: 1.0)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(msg.text, style: TextStyle(color: _textColor)),
+          if (msg.chips.isNotEmpty) ...[
+            const SizedBox(height: 1),
+            // Chips come from the package: colored label plate + gray name
+            // plate, wrapping onto rows; no hand-rolled styling in the demo.
+            FileChips(items: msg.chips),
+          ],
+        ],
+      ),
+    );
+  }
+
   // -- Prompt ----------------------------------------------------------------
+
   // Agent-colored left border, the input, and the agent line. `Tab` cycles the
   // agent, which recolors border, agent name and caret together.
 
@@ -408,6 +467,15 @@ class _ComposerDemoState extends State<ComposerDemo> {
               style: TextStyle(color: _textColor),
               cursorBlinkRate: const Duration(milliseconds: 500),
               onSuggestionsRequested: _provideSuggestions,
+              onSuggestionSelected: (suggestion) {
+                if (suggestion.kind == FileTextFieldSuggestionKind.folder) {
+                  setState(() {
+                    _pickedFolders.add(
+                      FileChipItem.directory(suggestion.displayLabel),
+                    );
+                  });
+                }
+              },
               // The menu is drawn above the prompt by [_buildMenuPanel], so
               // the widget's own in-place menu is switched off here.
               suggestionMenuPlacement: SuggestionMenuPlacement.host,
@@ -415,8 +483,23 @@ class _ComposerDemoState extends State<ComposerDemo> {
               onFileClick: (file) => FileOpener.openLocation(file.path),
               // Sending clears the prompt, the way a chat composer would.
               onSubmitted: (text) {
+                final files = List<FileInfo>.from(
+                  _fieldKey.currentState?.getAttachedFiles() ?? const [],
+                );
+                final chips = [
+                  for (final file in files) FileChipItem.file(file),
+                  ..._pickedFolders,
+                ];
+                final agent = _agentIndex;
+                // Clear the field (text + tokens + attachments) first; it
+                // calls setState internally, so keep the message append
+                // separate to avoid nesting setState.
+                _fieldKey.currentState?.clearAttachments();
                 setState(() {
-                  _controller.text = '';
+                  _pickedFolders.clear();
+                  _messages.add(
+                    _ChatMessage(text: text, chips: chips, agentIndex: agent),
+                  );
                 });
               },
             ),
@@ -497,7 +580,28 @@ class _ComposerDemoState extends State<ComposerDemo> {
             'Demo nocterm_file_color · composer prompt',
             style: TextStyle(color: Colors.brightCyan),
           ),
-          const Spacer(),
+          const SizedBox(height: 1),
+          Expanded(
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final msg in _messages) ...[
+                    _buildMessageCard(msg),
+                    const SizedBox(height: 1),
+                  ],
+                  if (_messages.isEmpty)
+                    Text(
+                      'No messages yet — type below and press Enter.',
+                      style: TextStyle(color: _dimColor),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 1),
           _buildMenuPanel(),
           _buildPrompt(),
           const SizedBox(height: 1),

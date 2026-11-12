@@ -8,3 +8,5 @@ analysis_options.yaml
 test/
 build/
 coverage/
+doc/
+demo.tape
