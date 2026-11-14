@@ -727,6 +727,50 @@ class FileTextFieldState extends State<FileTextField>
     _selectSuggestion(suggestion);
   }
 
+  /// Highlights the suggestion at [index] — out-of-range indexes clamp into
+  /// the list.
+  ///
+  /// The keyboard highlight and a host-drawn menu's mouse hover are the same
+  /// highlight: drive both from here and a row is never highlighted twice.
+  /// Enter a menu row with the mouse, call it, and the keyboard highlight
+  /// follows the pointer.
+  ///
+  /// Unlike arrow-key navigation this never pre-scrolls: a row already in the
+  /// window gets the highlight and the window stays put, so pointing at the
+  /// last visible row does not scroll the menu out from under the pointer.
+  /// Only a row outside the window (a programmatic call) scrolls it into
+  /// view.
+  void highlightSuggestion(int index) {
+    final count = _visibleSuggestions.length;
+    if (count == 0) return;
+    final pageSize = _effectiveSuggestionPageSize(count);
+    _setSuggestionState(() {
+      _selectedSuggestionIndex = index.clamp(0, count - 1);
+      final maxOffset = count > pageSize ? count - pageSize : 0;
+      _suggestionScrollOffset = _suggestionScrollOffset.clamp(0, maxOffset);
+      if (_selectedSuggestionIndex < _suggestionScrollOffset) {
+        _suggestionScrollOffset = _selectedSuggestionIndex;
+      } else if (_selectedSuggestionIndex >=
+          _suggestionScrollOffset + pageSize) {
+        _suggestionScrollOffset = _selectedSuggestionIndex - pageSize + 1;
+      }
+    });
+  }
+
+  /// Re-runs [FileTextField.onSuggestionsRequested] against the current
+  /// trigger and query, so an open menu updates without a keystroke.
+  ///
+  /// Call it when your suggestion source settles asynchronously — a finished
+  /// disk or network scan (`PromptIndex.load()`) — so the menu shows the real
+  /// candidates instead of a stale or fallback list. The host is notified
+  /// through [FileTextField.onSuggestionMenuChanged], and when the refreshed
+  /// list matches the one on screen the highlight and the scroll stay where
+  /// the keyboard or the pointer left them.
+  void refreshSuggestions() {
+    if (!mounted) return;
+    _setSuggestionState(() => _refreshSuggestions(keepSelection: true));
+  }
+
   // -- Token bookkeeping ----------------------------------------------------
   // Tokens live in the controller text and are re-derived from it, so the
   // attachment list and the painted spans can never drift apart.
@@ -1414,7 +1458,15 @@ class FileTextFieldState extends State<FileTextField>
     _controller.selection = TextSelection.collapsed(offset: start);
   }
 
-  void _refreshSuggestions() {
+  /// Re-runs the provider against the current query.
+  ///
+  /// [keepSelection] preserves the highlight and the scroll offset when the
+  /// provider returns the same list — the shape of an asynchronous source
+  /// that settled — instead of snapping the highlight back to the first row.
+  void _refreshSuggestions({bool keepSelection = false}) {
+    final previous = keepSelection
+        ? _visibleSuggestions
+        : const <FileTextFieldSuggestion>[];
     final trigger = _activeTrigger;
     final provider = component.onSuggestionsRequested;
     final List<FileTextFieldSuggestion> all =
@@ -1439,8 +1491,31 @@ class FileTextFieldState extends State<FileTextField>
             return !remainder.contains(sep);
           }).toList();
     _providedSuggestions = List.unmodifiable(filtered);
+    final refreshed = _visibleSuggestions;
+    if (_sameSuggestions(previous, refreshed)) {
+      // The source settled into the same list: keep where the highlight is.
+      if (refreshed.isNotEmpty) {
+        _selectedSuggestionIndex = _selectedSuggestionIndex.clamp(
+          0,
+          refreshed.length - 1,
+        );
+      }
+      return;
+    }
     _selectedSuggestionIndex = 0;
     _suggestionScrollOffset = 0;
+  }
+
+  /// Whether two suggestion lists hold the same rows in the same order.
+  bool _sameSuggestions(
+    List<FileTextFieldSuggestion> a,
+    List<FileTextFieldSuggestion> b,
+  ) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   List<FileTextFieldSuggestion> get _visibleSuggestions {
@@ -1897,6 +1972,20 @@ class FileTextFieldState extends State<FileTextField>
                               highlightMarkerColor:
                                   style.highlightMarkerColor ??
                                   style.selectedTextColor,
+                              description: _truncateDescription(
+                                suggestions[row.index].description,
+                                component.width?.toInt() == null
+                                    ? null
+                                    : component.width!.toInt() -
+                                          markerWidth -
+                                          suggestions[row.index]
+                                              .displayLabel
+                                              .length -
+                                          2,
+                              ),
+                              descriptionColor:
+                                  style.descriptionColor ??
+                                  TerminalColors.resolve(Colors.gray),
                             ),
                           ),
                         ),
@@ -1933,6 +2022,8 @@ class FileTextFieldState extends State<FileTextField>
     required Color? selectedTextColor,
     required Color? itemTextColor,
     required Color? highlightMarkerColor,
+    String? description,
+    Color? descriptionColor,
   }) {
     final baseColor = selected ? selectedTextColor : itemTextColor;
     final baseStyle = TextStyle(color: baseColor);
@@ -1946,6 +2037,14 @@ class FileTextFieldState extends State<FileTextField>
     final spans = <TextSpan>[TextSpan(text: prefix, style: prefixStyle)];
     if (query.isEmpty) {
       spans.add(TextSpan(text: label, style: baseStyle));
+      if (_hasDescription(description)) {
+        spans.add(
+          TextSpan(
+            text: '  $description',
+            style: TextStyle(color: descriptionColor),
+          ),
+        );
+      }
       return spans;
     }
     final lowerLabel = label.toLowerCase();
@@ -1973,7 +2072,27 @@ class FileTextFieldState extends State<FileTextField>
     if (spans.length == 1) {
       spans.add(TextSpan(text: label, style: baseStyle));
     }
+    if (_hasDescription(description)) {
+      spans.add(
+        TextSpan(
+          text: '  $description',
+          style: TextStyle(color: descriptionColor),
+        ),
+      );
+    }
     return spans;
+  }
+
+  bool _hasDescription(String? description) =>
+      description != null && description.isNotEmpty;
+
+  /// Caps a menu row's description at [budget] characters with a trailing
+  /// ellipsis, so a long summary wraps no rows. A `null` budget (no explicit
+  /// field width) or a degenerate budget leaves the text untouched.
+  String? _truncateDescription(String? description, int? budget) {
+    if (description == null || budget == null) return description;
+    if (description.length <= budget || budget < 2) return description;
+    return '${description.substring(0, budget - 1)}…';
   }
 
   void _handleSuggestionWheel(int direction) {

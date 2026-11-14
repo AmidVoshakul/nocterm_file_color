@@ -1,3 +1,55 @@
+## 0.1.0
+
+### Breaking
+
+- `FileTextFieldSuggestionKind` gains a `skill` case, and
+  `SuggestionMenuGrouping.defaultGroups` gains a `Skills` section — hosts with
+  exhaustive `switch` statements over the enum (no `default`) need the new
+  case, and menus mixing prompt assets gain a section.
+- `FileTextFieldSuggestion` gains value equality (`==`/`hashCode` over all
+  fields) where it compared by identity — collections and `contains` on
+  suggestion lists behave differently.
+- `FileTextField`'s submit path now pushes the expanded prompt onto the
+  prompt history (with attachments) when `promptHistory` is set; hosts that
+  pushed their own entries on submit may see duplicates.
+
+All other API is additive.
+
+### Features
+
+- **Skills and prompt conventions**: the `/` menu understands skills — named
+  instruction packs following the `SKILL.md` convention. `PromptIndex`
+  discovers all three families of prompt assets in one `load()`, defaulting to
+  the open `.agents/` standard (`skills/`, `commands/` — nested `sub/name.md`
+  namespaces to `/sub:name` —, `agents/`) and letting the host add any other
+  roots through `extraSkillRoots` / `extraCommandRoots` / `extraAgentRoots`
+  (`.claude/`, `.opencode/`, your own vendor, global and plugin directories).
+  Picked tokens expand into their bodies on send (`expandTokens`, with
+  `$ARGUMENTS` substituted for commands). The per-family `SkillIndex` /
+  `CommandIndex` / `AgentIndex` stay usable alone. Models `SkillInfo` /
+  `CommandInfo` / `AgentInfo` (name, description, body, path) map onto the new
+  `skill` kind and the existing `command`/`agent` kinds via `toSuggestion()`;
+  `expandSkillTokens` / `expandCommandTokens` do the same substitution family
+  by family. All discovery is best-effort, TTL-cached and read-only —
+  execution stays in the host application.
+- **Zero-dependency frontmatter parsing**: `SkillFrontmatter` reads
+  `name`/`description` (folded `>` and literal `|` blocks, quoted scalars,
+  plain multi-line scalars) with `when_to_use` appended to the summary, and
+  understands `disable-model-invocation` in the YAML 1.1 truthy family
+  (`true`/`yes`/`on`/`1`, any letter case) — no YAML dependency; hosts needing
+  full YAML pass their own parser through `parser:` on any index.
+- **Suggestion descriptions**: every suggestion kind accepts an optional
+  `description`, used by the built-in menu rows (truncated with an ellipsis,
+  colored by `SuggestionMenuStyle.descriptionColor`) and included in query
+  filtering.
+- **Command display modes**: `PromptIndex.inlineTokensFor(text)` returns the sent prompt's command and skill tokens as styled `InlineToken`s, so a transcript can show picked commands either expanded (`expandTokens` payload, opencode-style) or as the colored tags the composer showed while the model still receives the expansion (copilot-style). Under `expandTokens`' default auto mode a command's `$ARGUMENTS` becomes the text typed after the last command token — override with `arguments:` or disable with `autoArguments: false`. `PromptIndex.trailingArguments(text)` exposes that captured text on its own.
+- **Arguments after a picked token**: `expandSkillTokens` / `expandCommandTokens` accept the same `{arguments, autoArguments}` pair as `expandTokens`, and all three now expand command *and* skill tokens in one pass — a body asking for `$ARGUMENTS` consumes the typed tail into the placeholder (it no longer appears twice), a body without one receives that tail after a blank line (the Gemini-CLI convention), a skill token typed after a command is never swallowed, and `autoArguments: false` asks for verbatim token replacement.
+- **`FileTextFieldState.highlightSuggestion(index)`**: sets the keyboard highlight by index (clamped), so a host-drawn menu's mouse hover and the keyboard drive the same highlight — a menu no longer shows two highlighted rows when the pointer moves over one while the keyboard sits on another.
+- **`FileTextFieldState.refreshSuggestions()`**: re-runs `onSuggestionsRequested` against the current query, so a menu fed by an asynchronous source (`PromptIndex.load()`, a network scan) updates when the data lands instead of waiting for the next keystroke.
+- **Value equality for `FileTextFieldSuggestion`**: suggestions now compare by
+  value, so a host-rebuilt suggestion list selects and dedupes predictably
+  instead of relying on instance identity.
+
 ## 0.0.7
 
 ### Features

@@ -1,3 +1,7 @@
+export 'src/agent.dart';
+export 'src/agent_index.dart';
+export 'src/command.dart';
+export 'src/command_index.dart';
 export 'src/file_chips.dart';
 export 'src/file_config.dart';
 export 'src/file_detector.dart';
@@ -10,6 +14,9 @@ export 'src/file_text_field_suggestion.dart';
 export 'src/inline_token.dart';
 export 'src/prompt_edge_step.dart';
 export 'src/prompt_history.dart';
+export 'src/prompt_index.dart';
+export 'src/skill.dart';
+export 'src/skill_index.dart';
 export 'src/suggestion_grouping.dart';
 export 'src/suggestion_menu_style.dart';
 export 'src/terminal_colors.dart';

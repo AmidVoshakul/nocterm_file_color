@@ -3,6 +3,9 @@ import 'package:test/test.dart';
 
 import '../example/nocterm_file_color_example.dart' as example;
 
+/// The demo's hover/highlight background (RGB 46,46,52).
+const _hoverBackground = Color(0x2E2E34);
+
 /// Row of the composer input.
 ///
 /// The agent line (`<agent> · <model> …`) is the only text that identifies the
@@ -13,6 +16,21 @@ int _inputRow(List<String> lines) {
   final agentRow = lines.indexWhere((line) => line.contains('Muse'));
   expect(agentRow, greaterThan(1), reason: 'agent line is rendered');
   return agentRow - 2;
+}
+
+/// Lines whose cells carry the hover background — the highlighted rows.
+int _highlightedRows(NoctermTester tester) {
+  final buffer = tester.terminalState.buffer;
+  final lines = <int>{};
+  for (var y = 0; y < tester.terminalState.size.height; y++) {
+    for (var x = 0; x < tester.terminalState.size.width; x++) {
+      if (buffer.getCell(x, y).style.backgroundColor == _hoverBackground) {
+        lines.add(y);
+        break;
+      }
+    }
+  }
+  return lines.length;
 }
 
 void main() {
@@ -260,5 +278,38 @@ void main() {
         expect(tester.terminalState.getText(), contains('dir'));
       });
     });
+    test(
+      'the menu shows exactly one highlighted row — hover moves it',
+      () async {
+        await testNocterm('demo single highlight', (tester) async {
+          await tester.pumpComponent(const example.ComposerDemo());
+          await tester.pump();
+          // The `@` menu lists the working directory synchronously.
+          await tester.enterText('@');
+          await tester.pump();
+
+          // The keyboard highlight sits on the first row.
+          expect(_highlightedRows(tester), 1);
+
+          // Hover a real row of the open menu — a file row of the cwd.
+          final rowY = tester.terminalState
+              .getText()
+              .split('\n')
+              .indexWhere((line) => line.contains('CHANGELOG.md'));
+          expect(rowY, greaterThan(0), reason: 'a menu row is on screen');
+          await tester.sendMouseEvent(
+            MouseEvent(
+              button: MouseButton.left,
+              x: 6,
+              y: rowY,
+              pressed: false,
+              isMotion: true,
+            ),
+          );
+          await tester.pump();
+          expect(_highlightedRows(tester), 1);
+        });
+      },
+    );
   });
 }

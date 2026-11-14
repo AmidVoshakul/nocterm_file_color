@@ -7,13 +7,20 @@ import 'file_info.dart';
 ///
 /// The category describes how the selected item is represented. It does not
 /// imply that the package executes agents or commands.
-enum FileTextFieldSuggestionKind { file, folder, agent, command, session }
+enum FileTextFieldSuggestionKind {
+  file,
+  folder,
+  agent,
+  command,
+  session,
+  skill,
+}
 
 /// An item supplied by the host application for the `@` or `/` suggestion menu.
 ///
 /// Files are added to `FileTextFieldState.getAttachedFiles()` when selected.
-/// Folders, agents, and commands are inserted as colored tokens and remain the
-/// host application's responsibility.
+/// Folders, agents, commands and skills are inserted as colored tokens and
+/// remain the host application's responsibility.
 class FileTextFieldSuggestion {
   /// Creates a file suggestion. Selecting it attaches [file].
   ///
@@ -22,6 +29,7 @@ class FileTextFieldSuggestion {
   factory FileTextFieldSuggestion.file(
     FileInfo file, {
     required FileStyle style,
+    String? description,
     String? searchText,
     String? path,
   }) {
@@ -30,6 +38,7 @@ class FileTextFieldSuggestion {
       name: file.name,
       style: style,
       searchText: searchText ?? '${file.name} ${file.path}',
+      description: description,
       file: file,
       prefix: null,
       path: path,
@@ -43,6 +52,7 @@ class FileTextFieldSuggestion {
     required this.name,
     FileStyle? style,
     this.searchText,
+    this.description,
     this.prefix,
     this.path,
   }) : kind = FileTextFieldSuggestionKind.folder,
@@ -58,6 +68,7 @@ class FileTextFieldSuggestion {
     required this.name,
     FileStyle? style,
     this.searchText,
+    this.description,
     this.prefix,
     this.path,
   }) : kind = FileTextFieldSuggestionKind.agent,
@@ -71,6 +82,7 @@ class FileTextFieldSuggestion {
     required this.name,
     FileStyle? style,
     this.searchText,
+    this.description,
     this.path,
   }) : kind = FileTextFieldSuggestionKind.command,
        style = style ?? defaultCommandStyle,
@@ -87,15 +99,35 @@ class FileTextFieldSuggestion {
     this.prefix,
     FileStyle? style,
     this.searchText,
+    this.description,
     this.path,
   }) : kind = FileTextFieldSuggestionKind.session,
        style = style ?? defaultSessionStyle,
        file = null;
+
+  /// Creates a skill suggestion. [name] omits the leading `/`.
+  ///
+  /// Skills are named instruction packs (the `SKILL.md` convention); the host
+  /// keeps their execution. [description] is the skill's summary, used both
+  /// for menu rows and for query filtering.
+  ///
+  /// [style] defaults to [defaultSkillStyle].
+  const FileTextFieldSuggestion.skill({
+    required this.name,
+    this.description,
+    FileStyle? style,
+    this.searchText,
+    this.path,
+  }) : kind = FileTextFieldSuggestionKind.skill,
+       style = style ?? defaultSkillStyle,
+       file = null,
+       prefix = null;
   const FileTextFieldSuggestion._({
     required this.kind,
     required this.name,
     required this.style,
     this.searchText,
+    this.description,
     this.file,
     this.prefix,
     this.path,
@@ -126,6 +158,11 @@ class FileTextFieldSuggestion {
     background: Colors.green,
   );
 
+  static const FileStyle defaultSkillStyle = FileStyle(
+    text: Colors.brightWhite,
+    background: Colors.white,
+  );
+
   /// Category of the suggestion.
   final FileTextFieldSuggestionKind kind;
 
@@ -140,6 +177,11 @@ class FileTextFieldSuggestion {
 
   /// Optional additional searchable text. Defaults to [name].
   final String? searchText;
+
+  /// Optional one-line summary shown next to the suggestion in the menu and
+  /// included in query filtering. Used by skill suggestions; harmless on any
+  /// other kind.
+  final String? description;
 
   /// Present only for file suggestions.
   final FileInfo? file;
@@ -162,12 +204,44 @@ class FileTextFieldSuggestion {
       FileTextFieldSuggestionKind.agent => '@$name',
       FileTextFieldSuggestionKind.command => '/$name',
       FileTextFieldSuggestionKind.session => '@session $name',
+      FileTextFieldSuggestionKind.skill => '/$name',
     };
   }
 
   /// Text used by the package's case-insensitive query filter.
-  String get searchableText =>
-      '${searchText ?? name} $displayLabel'.toLowerCase();
+  String get searchableText {
+    final base = '${searchText ?? name} $displayLabel';
+    final summary = description;
+    return summary == null || summary.isEmpty
+        ? base.toLowerCase()
+        : '$base $summary'.toLowerCase();
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FileTextFieldSuggestion &&
+          runtimeType == other.runtimeType &&
+          kind == other.kind &&
+          name == other.name &&
+          style == other.style &&
+          searchText == other.searchText &&
+          description == other.description &&
+          file == other.file &&
+          prefix == other.prefix &&
+          path == other.path;
+
+  @override
+  int get hashCode => Object.hash(
+    kind,
+    name,
+    style,
+    searchText,
+    description,
+    file,
+    prefix,
+    path,
+  );
 }
 
 /// Supplies suggestions for a trigger (`@` or `/`) and the current query.

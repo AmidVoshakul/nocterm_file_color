@@ -83,9 +83,6 @@ class _ComposerDemoState extends State<ComposerDemo> {
   /// Reaches the menu state the demo renders itself; see [_buildMenuPanel].
   final _fieldKey = GlobalKey<FileTextFieldState>();
 
-  /// Row the mouse hovers, or -1. Keyboard highlighting lives in the widget.
-  int _menuHoverIndex = -1;
-
   /// Sent messages, rendered as cards above the composer.
   final List<_ChatMessage> _messages = [];
 
@@ -244,10 +241,9 @@ class _ComposerDemoState extends State<ComposerDemo> {
       ]);
     }
 
-    final normalizedQuery = query.toLowerCase();
-    return suggestions
-        .where((s) => s.searchableText.contains(normalizedQuery))
-        .toList();
+    // No query filtering here: the field filters the result itself, so a
+    // second filter in the host would be a second authority on the same rule.
+    return suggestions;
   }
 
   // -- Mention menu -----------------------------------------------------------
@@ -255,23 +251,6 @@ class _ComposerDemoState extends State<ComposerDemo> {
   // Rendered as its own panel above the prompt instead of inside the field, so
   // the prompt keeps its bar. [FileTextFieldState] supplies the rows, the
   // highlighted index and programmatic selection.
-  /// Heading of the section that starts at [flatIndex], or `null` when the
-  /// row starts none.
-  String? headingBefore(FileTextFieldState? state, int flatIndex) {
-    if (state == null) return null;
-    var index = 0;
-    for (final group in state.visibleSuggestionGroups) {
-      final title = group.title;
-      if (title == null) {
-        index += group.items.length;
-        continue;
-      }
-      if (index == flatIndex) return title;
-      index += group.items.length;
-    }
-    return null;
-  }
-
   /// Breadcrumb of the directory the `@` menu is browsing, or `null` at the
   /// root. RightArrow drops into the highlighted folder, LeftArrow leaves it.
   String? _breadcrumb(FileTextFieldState? state) {
@@ -283,20 +262,42 @@ class _ComposerDemoState extends State<ComposerDemo> {
 
   Component _buildMenuPanel() {
     final state = _fieldKey.currentState;
-    final suggestions = state?.visibleSuggestions ?? const [];
+    final groups = state?.visibleSuggestionGroups ?? const [];
     final selectedIndex = state?.selectedSuggestionIndex ?? -1;
-    if (suggestions.isEmpty) return const SizedBox.shrink();
+    if (groups.every((group) => group.items.isEmpty)) {
+      return const SizedBox.shrink();
+    }
     final breadcrumb = _breadcrumb(state);
 
     final pageSize = state?.suggestionPageSize ?? 8;
-    final offset = (state?.suggestionScrollOffset ?? 0).clamp(
-      0,
-      suggestions.isEmpty
-          ? 0
-          : (suggestions.length - pageSize).clamp(0, suggestions.length),
-    );
-    final end = (offset + pageSize).clamp(0, suggestions.length);
-    final visible = suggestions.sublist(offset, end);
+    final total = groups.fold<int>(0, (sum, g) => sum + g.items.length);
+    final offset = (state?.suggestionScrollOffset ?? 0).clamp(0, total);
+
+    // Walk the package's own sections, numbering rows in the same flat order
+    // the field highlights and pages by — the headings come from the groups,
+    // not re-derived here.
+    final rows = <Component>[];
+    var flat = 0;
+    for (final group in groups) {
+      final groupStart = flat;
+      flat += group.items.length;
+      final groupEnd = flat;
+      final inWindow = groupStart < offset + pageSize && groupEnd > offset;
+      if (!inWindow) continue;
+      if (group.title != null) {
+        rows.add(Text(group.title!, style: TextStyle(color: _dimColor)));
+      }
+      for (var i = groupStart; i < groupEnd; i++) {
+        if (i < offset || i >= offset + pageSize) continue;
+        rows.add(
+          _buildMenuRow(
+            i,
+            group.items[i - groupStart],
+            highlighted: i == selectedIndex,
+          ),
+        );
+      }
+    }
 
     // A left-only border is what draws the panel's bar; Nocterm also reserves
     // one row above and below it, which is the spacing we want anyway.
@@ -320,18 +321,7 @@ class _ComposerDemoState extends State<ComposerDemo> {
           children: [
             if (breadcrumb != null)
               Text(breadcrumb, style: TextStyle(color: _dimColor)),
-            for (var i = 0; i < visible.length; i++) ...[
-              // Section heading, drawn by the demo rather than the package.
-              if (headingBefore(state, offset + i) case final heading?)
-                Text(heading, style: TextStyle(color: _dimColor)),
-              _buildMenuRow(
-                offset + i,
-                visible[i],
-                highlighted:
-                    offset + i == selectedIndex ||
-                    offset + i == _menuHoverIndex,
-              ),
-            ],
+            ...rows,
           ],
         ),
       ),
@@ -344,8 +334,11 @@ class _ComposerDemoState extends State<ComposerDemo> {
     required bool highlighted,
   }) {
     return MouseRegion(
-      onEnter: (_) => setState(() => _menuHoverIndex = index),
-      onExit: (_) => setState(() => _menuHoverIndex = -1),
+      // Hover moves the one highlight the keyboard also drives, so the menu
+      // never shows two highlighted rows.
+      // Hover moves the one highlight the keyboard also drives, so the menu
+      // never shows two highlighted rows.
+      onEnter: (_) => _fieldKey.currentState?.highlightSuggestion(index),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => _fieldKey.currentState?.selectSuggestion(suggestion),
@@ -363,14 +356,16 @@ class _ComposerDemoState extends State<ComposerDemo> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              // Right: kind name — single line, no ellipsis, overflow visible.
+              // Right: the prompt asset's summary when it has one (commands,
+              // skills, agents), its kind name otherwise — one line, then
+              // ellipsis.
               Expanded(
                 flex: 2,
                 child: Text(
-                  suggestion.kind.name,
+                  suggestion.description ?? suggestion.kind.name,
                   style: TextStyle(color: _dimColor),
-                  maxLines: 2,
-                  overflow: TextOverflow.visible,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],

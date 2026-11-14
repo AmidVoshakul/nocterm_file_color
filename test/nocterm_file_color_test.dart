@@ -780,6 +780,52 @@ void main() {
       controller.dispose();
     });
 
+    test('non-file suggestions survive a folder browse', () async {
+      final controller = TextEditingController();
+
+      await testNocterm('browse keeps non-file rows', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            // Built the way hosts build them — through the models — so a
+            // path leaking into a non-file row fails here, not in the wild.
+            onSuggestionsRequested: (trigger, query) => [
+              const FileTextFieldSuggestion.folder(name: 'lib/', path: 'lib'),
+              const AgentInfo(
+                name: 'explore',
+                description: 'Reads code.',
+                path: '.claude/agents/explore.md',
+              ).toSuggestion(),
+              const CommandInfo(
+                name: 'help',
+                description: 'Shows help.',
+                path: '.claude/commands/help.md',
+              ).toSuggestion(),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+        expect(tester.terminalState, containsText('@explore'));
+
+        // Drop into the folder: only pathless (non-file) rows must remain.
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.arrowRight),
+        );
+        await tester.pump();
+        expect(tester.terminalState, containsText('@explore'));
+        expect(tester.terminalState, containsText('/help'));
+        expect(tester.terminalState, isNot(containsText('lib/')));
+      });
+
+      controller.dispose();
+    });
+
     test('arrows keep the caret still even with no matches', () async {
       final controller = TextEditingController();
 
@@ -2940,6 +2986,110 @@ void main() {
         );
         await tester.pump();
         expect(key.currentState!.selectedSuggestionIndex, 1);
+      });
+
+      controller.dispose();
+    });
+
+    test('highlightSuggestion moves the keyboard highlight by index', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+
+      await testNocterm('highlight by index', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            onSuggestionsRequested: (trigger, query) => const [
+              FileTextFieldSuggestion.agent(name: 'explore'),
+              FileTextFieldSuggestion.agent(name: 'general'),
+              FileTextFieldSuggestion.command(name: 'help'),
+            ],
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 0);
+
+        key.currentState!.highlightSuggestion(2);
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 2);
+
+        // Out-of-range indexes clamp — a host must not crash the field.
+        key.currentState!.highlightSuggestion(99);
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 2);
+        key.currentState!.highlightSuggestion(-5);
+        await tester.pump();
+        expect(key.currentState!.selectedSuggestionIndex, 0);
+      });
+
+      controller.dispose();
+    });
+
+    test('highlightSuggestion never pre-scrolls a visible row', () async {
+      final controller = TextEditingController();
+      final key = GlobalKey<FileTextFieldState>();
+      final items = [
+        for (var i = 0; i < 20; i++)
+          FileTextFieldSuggestion.file(
+            FileInfo(
+              path: 'f$i.dart',
+              name: 'f$i.dart',
+              extension: 'dart',
+              type: FileType.code,
+            ),
+            style: const FileStyle(),
+          ),
+      ];
+
+      await testNocterm('hover no pre-scroll', (tester) async {
+        await tester.pumpComponent(
+          FileTextField(
+            key: key,
+            controller: controller,
+            focused: true,
+            width: 40,
+            height: 1,
+            suggestionPageSize: 8,
+            onSuggestionsRequested: (trigger, query) => items,
+          ),
+        );
+        await tester.sendKeyEvent(
+          const KeyboardEvent(logicalKey: LogicalKey.at, character: '@'),
+        );
+        await tester.pump();
+
+        // Arrow keys scroll by the threshold, as they should.
+        for (var i = 0; i < 8; i++) {
+          await tester.sendKeyEvent(
+            const KeyboardEvent(logicalKey: LogicalKey.arrowDown),
+          );
+          await tester.pump();
+        }
+        final offset = key.currentState!.suggestionScrollOffset;
+        expect(offset, greaterThan(0));
+
+        // Hover the LAST row of the visible window: no scroll, no drift.
+        key.currentState!.highlightSuggestion(
+          offset + key.currentState!.suggestionPageSize - 1,
+        );
+        await tester.pump();
+        expect(key.currentState!.suggestionScrollOffset, offset);
+        expect(
+          key.currentState!.selectedSuggestionIndex,
+          offset + key.currentState!.suggestionPageSize - 1,
+        );
+
+        // A row outside the window still scrolls into view.
+        key.currentState!.highlightSuggestion(19);
+        await tester.pump();
+        expect(key.currentState!.suggestionScrollOffset, greaterThan(offset));
       });
 
       controller.dispose();

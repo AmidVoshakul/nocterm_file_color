@@ -23,6 +23,9 @@ The approach is a **widget wrapper `FileTextField`** (NOT a fork of Nocterm). Wr
 - `FileOpener` - cross-platform opening of a file location in the OS (`xdg-open`/`open`/`explorer`).
 - `FileChips` — read-only attachment chips for chat messages (colored label plate + gray name plate), with `FileChipItem.file`/`.directory`, `FileConfig`/theme colors and `NO_COLOR` support.
 - `FileSystemCache` - LRU+TTL directory listings with a batched tree walk.
+- `SkillInfo` / `CommandInfo` / `AgentInfo` - prompt-asset models (`SKILL.md`, command and agent `*.md`): `name`, `description`, `body`, `path` (+`directory`, `disableModelInvocation` for skills); `toSuggestion()` maps each onto its menu kind; `expandSkillTokens(text, skills)` / `expandCommandTokens(text, commands, {arguments})` substitute bodies (`$ARGUMENTS` for commands) before sending.
+- `SkillIndex` / `CommandIndex` / `AgentIndex` - read-only discovery per family; the only defaults are the open `.agents/` standard (`.agents/skills`, `.agents/commands` — nested `sub/name.md` namespaces to `sub:name` —, `.agents/agents`) — every other root (`.claude/`, `.opencode/`, host-specific, global, plugin) is host policy passed via `extraRoots`; TTL cache; best-effort; `parser` injection point for full-YAML hosts — the indexes match Markdown files only, so TOML/MDC-style ecosystems are the host's own layer.
+- `PromptIndex` - DX facade: one `load()` scans the `.agents/` defaults (+ per-family `extra*Roots`), `suggestionsFor(trigger)` feeds `@`/`/` menus, `expandTokens(text, {arguments, autoArguments})` expands picked command/skill tokens (auto mode feeds `$ARGUMENTS` from the trailing text; `trailingArguments` exposes it), `inlineTokensFor(text)` colors them for a transcript; call `FileTextFieldState.refreshSuggestions()` after the async `load()`; precedence = defaults → extras in order, first source wins; `SkillFrontmatter` is the shared zero-dep frontmatter parser (folded/literal/plain-multi-line blocks, quoted scalars, `when_to_use` appended to the summary, YAML 1.1 truthy `disable-model-invocation`), internals in `prompt_index_core.dart` (not exported).
 - `TerminalColors` - `NO_COLOR` support shared by the package's colour output.
 
 ### State Management
@@ -33,7 +36,7 @@ The approach is a **widget wrapper `FileTextField`** (NOT a fork of Nocterm). Wr
 ### Suggestion menu placement
 - `suggestionMenuBuilder` restyles the `@`/`/` menu inside `FileTextField`, above the input.
 - To draw the menu elsewhere (e.g. a separate panel above your own prompt container), set `suggestionMenuPlacement: SuggestionMenuPlacement.host` and read `FileTextFieldState.visibleSuggestions` / `.selectedSuggestionIndex` via a `GlobalKey`; select rows with `.selectSuggestion(...)`.
-- Keep an external menu in sync with `onSuggestionMenuChanged` (fires on open/close, query change and highlight move — arrow keys change the highlight without editing text, so `onChanged` is not enough).
+- Keep an external menu in sync with `onSuggestionMenuChanged` (fires on open/close, query change and highlight move — arrow keys change the highlight without editing text, so `onChanged` is not enough). Mouse hover drives the same highlight through `highlightSuggestion(index)`, so a menu never shows two highlighted rows.
 
 ### Target file structure
 ```
@@ -46,6 +49,14 @@ lib/
     prompt_edge_step.dart # pure readline edge-stepping helpers
     file_chips.dart # read-only attachment chips for chat messages
     file_text_field_suggestion.dart # @/ menu model + kinds + defaults
+    skill.dart # skill model (SKILL.md) + token expansion helper
+    skill_index.dart # SKILL.md discovery + zero-dep frontmatter parser
+    command.dart # command model + token expansion helper
+    command_index.dart # slash-command discovery (*.md, nested ns:name)
+    agent.dart # subagent model
+    agent_index.dart # subagent discovery (*.md)
+    prompt_index.dart # DX facade over skills + commands + agents
+    prompt_index_core.dart # internal shared scanner + token expander (not exported)
     suggestion_menu_style.dart # style of the built-in menu
     cursor_blink_mixin.dart # shared caret blink for overlay fields
     text_viewport.dart # shared grow-then-scroll viewport for the fields
@@ -78,7 +89,7 @@ lib/
 - In the label we show **only the name**: `[image 1]`, `[image 2]` for inserted images, `[lib/main.dart]`, `[/home/user/Develop/RustroverProjects/todo/src/main.rs]` for @-mentions.
 - Clicking on the default label opens the file location in the OS; overridden via `onFileClick`.
 - Colors are configured per-type in the application code / config file (Nocterm palette + custom colors).
-- File insertion triggers: copy-paste, @-menu, programmatic attach, manual path entry. (Nocterm 0.9.0 has no public API for file drops from outside the terminal, so drag-and-drop is NOT supported.)
+- File insertion triggers: copy-paste, @-menu, programmatic attach. Typed text is NOT parsed into attachments — the controller text is the single truth, and attachments are reconciled from it one way only (a deleted token detaches; a typed path attaches nothing). (Nocterm 0.9.0 has no public API for file drops from outside the terminal, so drag-and-drop is NOT supported.)
 - The package does NOT manage the life cycle of files - the application does that; the package just displays the state and returns a list.
 
 ## Build and tests

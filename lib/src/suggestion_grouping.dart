@@ -61,7 +61,8 @@ class SuggestionMenuGrouping {
     this.ungroupedTitle = 'Other',
   });
 
-  /// Built-in sections: files and folders, then agents, sessions, commands.
+  /// Built-in sections: files and folders, then agents, sessions, commands
+  /// and skills.
   static const List<SuggestionMenuGroup> defaultGroups = [
     SuggestionMenuGroup('Files & folders', [
       FileTextFieldSuggestionKind.file,
@@ -70,6 +71,7 @@ class SuggestionMenuGrouping {
     SuggestionMenuGroup('Agents', [FileTextFieldSuggestionKind.agent]),
     SuggestionMenuGroup('Sessions', [FileTextFieldSuggestionKind.session]),
     SuggestionMenuGroup('Commands', [FileTextFieldSuggestionKind.command]),
+    SuggestionMenuGroup('Skills', [FileTextFieldSuggestionKind.skill]),
   ];
 
   /// Sections in render order. A section with no visible items is skipped.
